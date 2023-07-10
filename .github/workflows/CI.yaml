@@ -71,7 +71,12 @@ jobs:
   types:
     name: Types Test
     runs-on: ubuntu-20.04
-    steps:
+    strategy:
+      matrix:
+        # platform: ['linux/amd64', 'linux/ppc64le']
+        os: [ ubuntu22.04 ]
+        architecture: [ amd64, ppc64le ]
+    steps:   
 
     - name: Checkout
       uses: actions/checkout@v3
@@ -84,23 +89,51 @@ jobs:
         cache-dependency-path: |
           requirements.txt
           requirements-dev.txt
-
-    - name: Install system dependencies
+    - name: Run types-test on amd64
       run: |
-        sudo apt-get update
-        sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
+        if [[ "${{ matrix.architecture }}" == "amd64" ]]; then
+          echo "amd64"
+          sudo apt-get update
+          sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
+          pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
+          ./hack/verify-requirements.sh
+          pip install -r ./requirements-dev.txt
+          make types-test          
+        else
+          echo " Running on ${{ matrix.architecture }}"
+        fi        
 
-    - name: Check requirements.txt
-      run: |
-        pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
-        ./hack/verify-requirements.sh
-
-    - name: Install dependencies
-      run: |
-        pip install -r ./requirements-dev.txt
-
-    - name: Check Types
-      run: make types-test
+    - name: Run-On-ArchAction
+      uses: uraimo/run-on-arch-action@v2
+      with:          
+          distro: ${{ matrix.os }}
+          arch: ppc64le
+          run: |
+            if [[ "${{ matrix.architecture }}" == "ppc64le" ]]; then
+              uname -m
+              uname -a
+              apt-get -y update;
+              apt-get install -y apt-transport-https ca-certificates curl software-properties-common git              
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+              apt-key fingerprint 0EBFCD88
+                            
+              add-apt-repository "deb https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" -y
+              add-apt-repository  "deb https://apt.dockerproject.org/repo/ ubuntu-$(lsb_release -cs) main" -y
+              add-apt-repository ppa:deadsnakes/ppa -y
+              apt-get update
+              apt-get -y install docker-ce docker-compose npm
+              apt-get -y install  python3.9 python3-pip apt-transport-https
+              git clone -b dev-master-1  https://github.com/raja-0940/quay
+              cd quay
+              sudo apt-get update
+              sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
+              pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
+              ./hack/verify-requirements.sh
+              pip install -r ./requirements-dev.txt
+              make types-test
+            else
+              echo " Running on ${{ matrix.architecture }}"
+            fi
 
   e2e:
     name: E2E Tests
