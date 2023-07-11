@@ -114,19 +114,13 @@ jobs:
               uname -a
               apt-get -y update;
               apt-get install -y apt-transport-https ca-certificates curl software-properties-common git              
-              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-              apt-key fingerprint 0EBFCD88
-                            
-              add-apt-repository "deb https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" -y
-              add-apt-repository  "deb https://apt.dockerproject.org/repo/ ubuntu-$(lsb_release -cs) main" -y
               add-apt-repository ppa:deadsnakes/ppa -y
               apt-get update
-              apt-get -y install docker-ce docker-compose npm
-              apt-get -y install  python3.9 python3-pip apt-transport-https
+              apt-get -y install  python3.9 python3-pip
               git clone -b dev-master-1  https://github.com/raja-0940/quay
               cd quay
-              sudo apt-get update
-              sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
+              apt-get update
+              apt-get -y install libgpgme-dev libldap2-dev libsasl2-dev swig
               pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
               ./hack/verify-requirements.sh
               pip install -r ./requirements-dev.txt
