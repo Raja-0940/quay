@@ -73,9 +73,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        # platform: ['linux/amd64', 'linux/ppc64le']
-        os: [ ubuntu22.04 ]
-        architecture: [ amd64, ppc64le ]
+        architecture: [ amd64, ppc64le ]        
     steps:   
 
     - name: Checkout
@@ -89,10 +87,11 @@ jobs:
         cache-dependency-path: |
           requirements.txt
           requirements-dev.txt
+
     - name: Run types-test on amd64
       run: |
         if [[ "${{ matrix.architecture }}" == "amd64" ]]; then
-          echo "amd64"
+          echo "amd64"          
           sudo apt-get update
           sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
           pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
@@ -101,34 +100,24 @@ jobs:
           make types-test          
         else
           echo " Running on ${{ matrix.architecture }}"
-        fi        
+        fi
 
-    - name: Run-On-ArchAction
-      uses: uraimo/run-on-arch-action@v2
-      with:          
-          distro: ${{ matrix.os }}
-          arch: ppc64le
-          run: |
-            if [[ "${{ matrix.architecture }}" == "ppc64le" ]]; then
-              uname -m
-              uname -a
-              apt-get -y update;
-              apt-get install -y apt-transport-https ca-certificates curl software-properties-common git              
-              add-apt-repository ppa:deadsnakes/ppa -y
-              apt-get update
-              apt-get -y install  python3.9 python3-pip
-              git clone -b dev-master-1  https://github.com/raja-0940/quay
-              cd quay
-              apt-get update
-              apt-get -y install libgpgme-dev libldap2-dev libsasl2-dev swig
-              pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
-              ./hack/verify-requirements.sh
-              pip install -r ./requirements-dev.txt
-              make types-test
-            else
-              echo " Running on ${{ matrix.architecture }}"
-            fi
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v2
 
+    - name: Run types-test on ppc64le 
+      run: |
+        if [[ "${{ matrix.architecture }}" == "ppc64le" ]]; then
+          docker run --rm -w /root/quay --platform ppc64le quay.io/raja0940/types-test:v3.9.17-verified-requirements \
+          /bin/bash -c ' \
+          source ~/.profile; \
+          pyenv global 3.9.17; \                    
+          pip install -r ./requirements-dev.txt --ignore-installed; \
+          make types-test;'
+        else
+          echo " Running on ${{ matrix.architecture }}"
+        fi
+    
   e2e:
     name: E2E Tests
     runs-on: ubuntu-20.04
