@@ -97,11 +97,7 @@ python-magic==0.4.15
 python-redis-lock==3.7.0
 python-swiftclient==3.8.1
 pytz==2019.3
-<<<<<<< HEAD
-PyYAML==6.0.1
-=======
 PyYAML==5.4.1
->>>>>>> 93086fa5888601996c7d4dfe4b936ed59c2ecd9c
 raven==6.10.0
 recaptcha2==0.1
 redis==3.5.3
