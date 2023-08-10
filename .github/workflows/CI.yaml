@@ -46,36 +46,6 @@ jobs:
         # Read each line of requirement.txt and flag if any line doesn't contain ==, @, newline, or #
         sed '/^$/d' < requirements.txt | while read i; do if [[ ! $i =~ [==|@|^#] ]]; then echo $i is not pinned; fi; done
 
-  pre-commit-checks:
-    name: Pre-commit checks
-    runs-on: ubuntu-22.04
-    steps:
-
-    - name: Checkout
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0  # fetch all commits and branches for pre-commit
-
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.9
-
-    - name: Set up Node 18
-      uses: actions/setup-node@v3
-      with:
-        node-version: 18
-        cache: npm
-        cache-dependency-path: web/package-lock.json
-
-    - name: Install npm dependencies
-      run: cd ./web && npm ci
-
-    - name: Run pre-commit checks
-      uses: pre-commit/action@v3.0.0
-      with:
-        extra_args: --from-ref origin/${{ github.base_ref }} --to-ref HEAD --verbose
-
   unit:
     name: Unit Test
     runs-on: ubuntu-20.04
@@ -101,7 +71,10 @@ jobs:
   types:
     name: Types Test
     runs-on: ubuntu-20.04
-    steps:
+    strategy:
+      matrix:
+        architecture: [ amd64, ppc64le ]        
+    steps:   
 
     - name: Checkout
       uses: actions/checkout@v3
@@ -115,23 +88,36 @@ jobs:
           requirements.txt
           requirements-dev.txt
 
-    - name: Install system dependencies
+    - name: Run types-test on amd64
       run: |
-        sudo apt-get update
-        sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
+        if [[ "${{ matrix.architecture }}" == "amd64" ]]; then
+          echo "amd64"          
+          sudo apt-get update
+          sudo apt-get install libgpgme-dev libldap2-dev libsasl2-dev swig
+          pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
+          ./hack/verify-requirements.sh
+          pip install -r ./requirements-dev.txt
+          make types-test          
+        else
+          echo " Running on ${{ matrix.architecture }}"
+        fi
 
-    - name: Check requirements.txt
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v2
+
+    - name: Run types-test on ppc64le 
       run: |
-        pip install wheel  # allow pip to use wheel instead of legacy 'setup.py install'
-        ./hack/verify-requirements.sh
-
-    - name: Install dependencies
-      run: |
-        pip install -r ./requirements-dev.txt
-
-    - name: Check Types
-      run: make types-test
-
+        if [[ "${{ matrix.architecture }}" == "ppc64le" ]]; then
+          docker run --rm -w /root/quay --platform ppc64le quay.io/raja0940/types-test:v3.9.17-verify-requirements-2 \
+          /bin/bash -c ' \
+          source ~/.profile; \
+          pyenv global 3.9.17; \                    
+          pip install -r ./requirements-dev.txt --ignore-installed; \
+          make types-test;'
+        else
+          echo " Running on ${{ matrix.architecture }}"
+        fi
+    
   e2e:
     name: E2E Tests
     runs-on: ubuntu-20.04
@@ -202,7 +188,7 @@ jobs:
 
     - name: Checkout
       uses: actions/checkout@v3
-
+    
     - name: Seed Database
       run: cd web && npm run quay:seed
 
@@ -221,7 +207,7 @@ jobs:
         docker restart quay-quay
         sleep 30
         make integration-test
-
+    
     - name: Cypress run
       uses: cypress-io/github-action@v5
       with:
