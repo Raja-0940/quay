@@ -56,7 +56,7 @@ services:
     build:
       context: .
       target: final
-    image: localhost/quay-local:latest
+    image: quay.io/projectquay/quay:3.9-unstable
     volumes:
       - "./conf:/quay-registry/conf"
       - "./local-dev/stack:/quay-registry/conf/stack"
