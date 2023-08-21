@@ -227,20 +227,19 @@ jobs:
         apt-get install python3.9 python3-pip python3-dev libpython3.9-dev python3.9-distutils -y; \
         python3.9 -m pip install --upgrade pip; \
         apt-get install -y libgpgme-dev libldap2-dev libsasl2-dev; \
-        pip --version;'
-      # export DOCKER_BUILDKIT=1; \
-      # docker build -t localhost/quay-local:latest .; \
-      # docker-compose up -d redis quay-db; \
-      # docker exec -t quay-db bash -c 'while ! pg_isready; do echo "waiting for postgres"; sleep 2; done'; \
-      # DOCKER_USER="1001:0" docker-compose up -d --no-build quay; \
-      # echo "Going for npm and python"; \
-      # git clone https://github.com/quay/quay.git; \
-      # cd web && npm run quay:seed; \
-      # pip install pytest requests; \
-      # docker restart quay-quay; \
-      # sleep 50; \
-      # cd ..; \
-      # make integration-test;'
+        pip --version; \
+        export DOCKER_BUILDKIT=1; \
+        docker build -t localhost/quay-local:latest .; \
+        docker-compose up -d redis quay-db; \
+        docker exec -t quay-db bash -c 'while ! pg_isready; do echo "waiting for postgres"; sleep 2; done'; \
+        DOCKER_USER="1001:0" docker-compose up -d --no-build quay; \
+        echo "Going for npm and python"; \
+        cd web && npm run quay:seed; \
+        pip install pytest requests; \
+        docker restart quay-quay; \
+        sleep 50; \
+        cd ..; \
+        make integration-test;'
           
     - name: Cypress run
       uses: cypress-io/github-action@v5
