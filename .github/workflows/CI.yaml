@@ -207,7 +207,7 @@ jobs:
 
     - name: Install dependencies and check types on ${{ matrix.architecture }} 
       run: |
-        docker run --rm --platform ${{ matrix.architecture }} -v /var/run/docker.sock:/var/run/docker.sock -w "/build" ubuntu:20.04 /bin/bash -ec ' \
+        docker run --rm --platform ${{ matrix.architecture }} -v /var/run/docker.sock:/var/run/docker.sock --mount "type=bind,src=$(pwd),dst=/build" -w "/build" ubuntu:20.04 /bin/bash -ec ' \
         echo "hello from $(uname -m)"; \
         export DEBIAN_FRONTEND=noninteractive; \
         apt-get update -y; \
