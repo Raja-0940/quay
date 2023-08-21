@@ -215,16 +215,14 @@ jobs:
         sudo install -m 0755 -d /etc/apt/keyrings; \
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
         sudo chmod a+r /etc/apt/keyrings/docker.gpg; \
-        echo \
-  "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-    "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
-      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null; \
-      apt-get update -y; \
-      sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; \
-      sudo apt-get install -y docker-compose; \
-      docker --version; \
-      docker-compose --version; \
-      docker ps;'
+        echo "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+        "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null; \
+        apt-get update -y; \
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; \
+        sudo apt-get install -y docker-compose; \
+        docker --version; \
+        docker-compose --version; \
+        docker ps;'
       # add-apt-repository ppa:deadsnakes/ppa -y; \
       # apt-get install python3.9 python3-pip python3-dev libpython3.9-dev python3.9-distutils -y; \
       # python3.9 -m pip install --upgrade pip; \
