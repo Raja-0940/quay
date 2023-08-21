@@ -208,7 +208,41 @@ jobs:
     - name: Install dependencies and check types on ${{ matrix.architecture }} 
       run: |
         docker run --rm --platform ${{ matrix.architecture }} -v /var/run/docker.sock:/var/run/docker.sock -w "/build" ubuntu:20.04 /bin/bash -ec ' \
-        echo "hello from $(uname -m)";'
+        echo "hello from $(uname -m)"; \
+        export DEBIAN_FRONTEND=noninteractive; \
+        apt-get update -y; \
+        apt-get install -y git wget tar curl gnupg2 ca-certificates sudo build-essential gcc manpages-dev autoconf libtool pkg-config software-properties-common; \
+        sudo install -m 0755 -d /etc/apt/keyrings; \
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg; \
+        echo \
+  "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+    "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null; \
+      apt-get update -y; \
+      sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; \
+      sudo apt-get install -y docker-compose; \
+      docker --version; \
+      docker-compose --version; \
+      docker ps;'
+      # add-apt-repository ppa:deadsnakes/ppa -y; \
+      # apt-get install python3.9 python3-pip python3-dev libpython3.9-dev python3.9-distutils -y; \
+      # python3.9 -m pip install --upgrade pip; \
+      # apt-get install -y libgpgme-dev libldap2-dev libsasl2-dev; \
+      # pip --version; \
+      # export DOCKER_BUILDKIT=1; \
+      # docker build -t localhost/quay-local:latest .; \
+      # docker-compose up -d redis quay-db; \
+      # docker exec -t quay-db bash -c 'while ! pg_isready; do echo "waiting for postgres"; sleep 2; done'; \
+      # DOCKER_USER="1001:0" docker-compose up -d --no-build quay; \
+      # echo "Going for npm and python"; \
+      # git clone https://github.com/quay/quay.git; \
+      # cd web && npm run quay:seed; \
+      # pip install pytest requests; \
+      # docker restart quay-quay; \
+      # sleep 50; \
+      # cd ..; \
+      # make integration-test;'
 
           # docker run 
           # --rm          
