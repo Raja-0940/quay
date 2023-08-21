@@ -190,9 +190,8 @@ jobs:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
-        platform: ['linux/amd64', 'linux/ppc64le']
         os: [ ubuntu20.04 ]
-        architecture: [ ppc64le ]
+        architecture: [ amd64, ppc64le ]
       fail-fast: false
       max-parallel: 2   
     steps:
