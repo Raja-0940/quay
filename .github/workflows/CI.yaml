@@ -219,12 +219,10 @@ jobs:
         "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null; \
         apt-get update -y; \
         sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; \        
-        docker ps; \
         add-apt-repository ppa:deadsnakes/ppa -y; \
         apt-get install python3.9 python3-pip python3-dev libpython3.9-dev python3.9-distutils -y; \
         python3.9 -m pip install --upgrade pip; \
         apt-get install -y libgpgme-dev libldap2-dev libsasl2-dev; \
-        pip --version; \
         export DOCKER_BUILDKIT=1; \
         docker build -t localhost/quay-local:latest .; \
         docker compose up -d redis quay-db; \
