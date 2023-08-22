@@ -211,7 +211,7 @@ jobs:
         echo "hello from $(uname -m)"; \
         export DEBIAN_FRONTEND=noninteractive; \
         apt-get update -y; \
-        apt-get install -y git wget tar curl gnupg2 ca-certificates sudo build-essential gcc manpages-dev autoconf libtool pkg-config software-properties-common; \
+        apt-get install -y git wget tar curl npm gnupg2 ca-certificates sudo build-essential gcc manpages-dev autoconf libtool pkg-config software-properties-common; \
         sudo install -m 0755 -d /etc/apt/keyrings; \
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
         sudo chmod a+r /etc/apt/keyrings/docker.gpg; \
@@ -230,17 +230,16 @@ jobs:
         pip --version; \
         export DOCKER_BUILDKIT=1; \
         docker build -t localhost/quay-local:latest .; \
-        docker-compose up -d redis quay-db;'
-        # docker exec -t quay-db bash -c 'echo "Hello from quay-db";'; \
-        # DOCKER_USER="1001:0"; \
-        # docker-compose up -d --no-build quay; \
-        # echo "Going for npm and python"; \
-        # cd web && npm run quay:seed; \
-        # pip install pytest requests; \
-        # docker restart quay-quay; \
-        # sleep 50; \
-        # cd ..; \
-        # make integration-test;'
+        docker compose up -d redis quay-db; \
+        docker exec -t quay-db bash -c 'while ! pg_isready; do; echo "waiting for postgres"; sleep 2; done'; \
+        DOCKER_USER="1001:0" docker compose up -d --no-build quay; \
+        echo "Going for npm and python"; \
+        cd web && npm run quay:seed; \
+        pip install pytest requests grpcio==1.53.0; \
+        docker restart quay-quay; \
+        sleep 50; \
+        cd ..; \
+        make integration-test;'
           
     - name: Cypress run
       uses: cypress-io/github-action@v5
