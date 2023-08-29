@@ -1,6 +1,11 @@
 import {AxiosError, AxiosResponse} from 'axios';
 import axios from 'src/libs/axios';
-import {assertHttpCode, BulkOperationError, ResourceError, throwIfError} from './ErrorHandling';
+import {
+  assertHttpCode,
+  BulkOperationError,
+  ResourceError,
+  throwIfError,
+} from './ErrorHandling';
 
 export interface TagsResponse {
   page: number;
@@ -18,6 +23,7 @@ export interface Tag {
   start_ts: number;
   manifest_list: ManifestList;
   expiration?: string;
+  end_ts?: number;
 }
 
 export interface ManifestList {
@@ -132,14 +138,19 @@ export const VulnerabilityOrder = {
   [VulnerabilitySeverity.Unknown]: 5,
 };
 
+// TODO: Support cancelation signal here
 export async function getTags(
   org: string,
   repo: string,
   page: number,
   limit = 100,
   specificTag = null,
+  onlyActiveTags = true,
 ) {
-  let path = `/api/v1/repository/${org}/${repo}/tag/?limit=${limit}&page=${page}&onlyActiveTags=true`;
+  let path = `/api/v1/repository/${org}/${repo}/tag/?limit=${limit}&page=${page}`;
+  if (onlyActiveTags) {
+    path = path.concat(`&onlyActiveTags=true`);
+  }
   if (specificTag) {
     path = path.concat(`&specificTag=${specificTag}`);
   }
@@ -147,14 +158,19 @@ export async function getTags(
   const urlSearchParams = new URLSearchParams(window.location.search);
   const urlParams = Object.fromEntries(urlSearchParams.entries());
   if (urlParams['filter_tag_name']) {
-    path = path.concat(`&filter_tag_name=${urlParams['filter_tag_name']}`)
+    path = path.concat(`&filter_tag_name=${urlParams['filter_tag_name']}`);
   }
   const response: AxiosResponse<TagsResponse> = await axios.get(path);
   assertHttpCode(response.status, 200);
   return response.data;
 }
 
-export async function getLabels(org: string, repo: string, digest: string, signal: AbortSignal) {
+export async function getLabels(
+  org: string,
+  repo: string,
+  digest: string,
+  signal: AbortSignal,
+) {
   const response: AxiosResponse<LabelsResponse> = await axios.get(
     `/api/v1/repository/${org}/${repo}/manifest/${digest}/labels`,
     {signal},
@@ -163,38 +179,65 @@ export async function getLabels(org: string, repo: string, digest: string, signa
   return response.data.labels;
 }
 
-export async function bulkCreateLabels(org: string, repo: string, manifest:string, labels: Label[]){
+export async function bulkCreateLabels(
+  org: string,
+  repo: string,
+  manifest: string,
+  labels: Label[],
+) {
   const responses = await Promise.allSettled(
-    labels.map((label)=>createLabel(org, repo, manifest, label))
-  )
+    labels.map((label) => createLabel(org, repo, manifest, label)),
+  );
   throwIfError(responses, 'Error creating labels');
 }
 
-export async function bulkDeleteLabels(org: string, repo: string, manifest:string, labels: Label[]){
+export async function bulkDeleteLabels(
+  org: string,
+  repo: string,
+  manifest: string,
+  labels: Label[],
+) {
   const responses = await Promise.allSettled(
-    labels.map((label)=>deleteLabel(org, repo, manifest, label))
-  )
+    labels.map((label) => deleteLabel(org, repo, manifest, label)),
+  );
   throwIfError(responses, 'Error deleting labels');
 }
 
-export async function createLabel(org: string, repo: string, manifest: string, label: Label){
+export async function createLabel(
+  org: string,
+  repo: string,
+  manifest: string,
+  label: Label,
+) {
   try {
-    await axios.post(`/api/v1/repository/${org}/${repo}/manifest/${manifest}/labels`, {
-      key: label.key,
-      value: label.value,
-      media_type: label.media_type,
-    })
-  }
-  catch(error){
-    throw new ResourceError('Unable to create label', `${label.key}=${label.value}` , error);
+    await axios.post(
+      `/api/v1/repository/${org}/${repo}/manifest/${manifest}/labels`,
+      {
+        key: label.key,
+        value: label.value,
+        media_type: label.media_type,
+      },
+    );
+  } catch (error) {
+    throw new ResourceError(
+      'Unable to create label',
+      `${label.key}=${label.value}`,
+      error,
+    );
   }
 }
 
-export async function deleteLabel(org: string, repo: string, manifest: string, label: Label){
+export async function deleteLabel(
+  org: string,
+  repo: string,
+  manifest: string,
+  label: Label,
+) {
   try {
-    await axios.delete(`/api/v1/repository/${org}/${repo}/manifest/${manifest}/labels/${label.id}`)
-  }
-  catch(error){
+    await axios.delete(
+      `/api/v1/repository/${org}/${repo}/manifest/${manifest}/labels/${label.id}`,
+    );
+  } catch (error) {
     throw new ResourceError('Unable to delete label', label.id, error);
   }
 }
@@ -205,10 +248,15 @@ interface TagLocation {
   tag: string;
 }
 
-export async function bulkDeleteTags(tags: TagLocation[], force = false) {
+export async function bulkDeleteTags(
+  org: string,
+  repo: string,
+  tags: string[],
+  force = false,
+) {
   const deletion_function = force ? expireTag : deleteTag;
   const responses = await Promise.allSettled(
-    tags.map((tag) => deletion_function(tag.org, tag.repo, tag.tag)),
+    tags.map((tag) => deletion_function(org, repo, tag)),
   );
 
   // Filter failed responses
@@ -255,18 +303,14 @@ export async function deleteTag(org: string, repo: string, tag: string) {
   }
 }
 
-export async function expireTag(
-  org: string,
-  repo: string,
-  tag: string,
-) {
+export async function expireTag(org: string, repo: string, tag: string) {
   try {
     const response: AxiosResponse = await axios.post(
       `/api/v1/repository/${org}/${repo}/tag/${tag}/expire`,
       {
         include_submanifests: true,
         is_alive: true,
-      }
+      },
     );
     assertHttpCode(response.status, 200);
   } catch (err) {
@@ -302,28 +346,70 @@ export async function getSecurityDetails(
   return response.data;
 }
 
-export async function createTag(org: string, repo: string, tag: string, manifest: string) {
-    await axios.put(
-      `/api/v1/repository/${org}/${repo}/tag/${tag}`,
-      {manifest_digest: manifest},
-    );
+export async function createTag(
+  org: string,
+  repo: string,
+  tag: string,
+  manifest: string,
+) {
+  await axios.put(`/api/v1/repository/${org}/${repo}/tag/${tag}`, {
+    manifest_digest: manifest,
+  });
 }
 
-export async function bulkSetExpiration(org: string, repo: string, tags: string[], expiration: number){
+export async function bulkSetExpiration(
+  org: string,
+  repo: string,
+  tags: string[],
+  expiration: number,
+) {
   const responses = await Promise.allSettled(
-    tags.map((tag)=>setExpiration(org, repo, tag, expiration))
-  )
+    tags.map((tag) => setExpiration(org, repo, tag, expiration)),
+  );
   throwIfError(responses, 'Error setting expiration for tags');
 }
 
-export async function setExpiration(org: string, repo: string, tag: string, expiration: number) {
+export async function setExpiration(
+  org: string,
+  repo: string,
+  tag: string,
+  expiration: number,
+) {
   try {
-    await axios.put(
-      `/api/v1/repository/${org}/${repo}/tag/${tag}`,
-      {expiration: expiration},
-    );
-  }
-  catch(error){
+    await axios.put(`/api/v1/repository/${org}/${repo}/tag/${tag}`, {
+      expiration: expiration,
+    });
+  } catch (error) {
     throw new ResourceError('Unable to set tag expiration', tag, error);
   }
+}
+
+export async function restoreTag(
+  org: string,
+  repo: string,
+  tag: string,
+  digest: string,
+) {
+  const response: AxiosResponse = await axios.post(
+    `/api/v1/repository/${org}/${repo}/tag/${tag}/restore`,
+    {
+      manifest_digest: digest,
+    },
+  );
+}
+
+export async function permanentlyDeleteTag(
+  org: string,
+  repo: string,
+  tag: string,
+  digest: string,
+) {
+  const response: AxiosResponse = await axios.post(
+    `/api/v1/repository/${org}/${repo}/tag/${tag}/expire`,
+    {
+      manifest_digest: digest,
+      include_submanifests: true,
+      is_alive: false,
+    },
+  );
 }
