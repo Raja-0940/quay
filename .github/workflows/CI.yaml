@@ -166,14 +166,8 @@ jobs:
             python3.9 --version; \
             pip install setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0; \
             ./hack/verify-requirements.sh; \
-            pip install -r ./requirements-dev.txt; \
-            make types-test;'
-          # docker run --rm -w /root/quay --platform ppc64le quay.io/raja0940/types-test:v3.9.17-verified-requirements \
-          # /bin/bash -c ' \
-          # source ~/.profile; \
-          # pyenv global 3.9.17; \
-          # pip install -r ./requirements-dev.txt --ignore-installed; \
-          # make types-test;'
+            pip install -r ./requirements-dev.txt --ignore-installed; \
+            make types-test;'          
         else
           echo " Running on ${{ matrix.architecture }}"
         fi
