@@ -46,6 +46,37 @@ jobs:
         # Read each line of requirement.txt and flag if any line doesn't contain ==, @, newline, or #
         sed '/^$/d' < requirements.txt | while read i; do if [[ ! $i =~ [==|@|^#] ]]; then echo $i is not pinned; fi; done
 
+  pre-commit-checks:
+    name: Pre-commit checks
+    runs-on: ubuntu-22.04
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # fetch all commits and branches for pre-commit
+
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+
+    - name: Set up Node 18
+      uses: actions/setup-node@v3
+      with:
+        node-version: 18
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install npm dependencies
+      run: cd ./web && npm ci
+
+    - name: Run pre-commit checks
+      uses: pre-commit/action@v3.0.0
+      with:
+        extra_args: --from-ref origin/${{ github.base_ref }} --to-ref HEAD --verbose
+
   unit:
     name: Unit Test
     runs-on: ubuntu-20.04
@@ -66,7 +97,13 @@ jobs:
         cat requirements-dev.txt | grep tox | xargs pip install
 
     - name: tox
-      run: tox -e py39-unit
+      run: tox -e py39-unit -- --cov=./ --cov-report=xml
+
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        flags: unit
 
   types:
     name: Types Test
@@ -108,16 +145,42 @@ jobs:
     - name: Run types-test on ppc64le 
       run: |
         if [[ "${{ matrix.architecture }}" == "ppc64le" ]]; then
-          docker run --rm -w /root/quay --platform ppc64le quay.io/raja0940/types-test:v3.9.17-verify-requirements-2 \
-          /bin/bash -c ' \
-          source ~/.profile; \
-          pyenv global 3.9.17; \                    
-          pip install -r ./requirements-dev.txt --ignore-installed; \
-          make types-test;'
+          docker run \
+            --rm \
+            --platform "linux/ppc64le" \
+            --mount "type=bind,src=$(pwd),dst=/quay" \
+            -w "/quay" \
+            "ubuntu:20.04" \
+            /bin/bash -ec ' \
+            export DEBIAN_FRONTEND=noninteractive; \
+            apt-get update -y && apt-get install -y build-essential autoconf libtool pkg-config git software-properties-common curl \
+            apt-transport-https ca-certificates curl wget make libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev llvm \
+            libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
+            libxml2 libxslt1.1 libgpgme-dev libldap2-dev libsasl2-dev swig libtiff5-dev libjpeg8-dev libopenjp2-7-dev \
+            libfreetype6-dev liblcms2-dev libwebp-dev tcl8.6-dev tk8.6-dev python3-tk \
+            libharfbuzz-dev libfribidi-dev libxcb1-dev build-essential cargo python3-dev python3-setuptools; \
+            add-apt-repository ppa:deadsnakes/ppa -y; \
+            apt-get update -y; \
+            curl https://pyenv.run | bash; \
+            echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.profile; \
+            echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.profile; \
+            echo 'eval "$(pyenv init -)"' >> ~/.profile; \
+            cat ~/.profile; \
+            source ~/.profile; \
+            pyenv --version; \
+            pyenv install 3.9.17; \
+            pyenv global 3.9.17; \
+            apt-get -y install python3-dev python3-setuptools; \
+            echo "***$(python --version)***"; \
+            echo "***$(pip --version)***"; \            
+            pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0; \
+            ./hack/verify-requirements.sh; \
+            pip install -r ./requirements-dev.txt; \
+            make types-test;'          
         else
           echo " Running on ${{ matrix.architecture }}"
         fi
-    
+        
   e2e:
     name: E2E Tests
     runs-on: ubuntu-20.04

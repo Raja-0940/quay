@@ -23,7 +23,6 @@ ALTER TABLE IF EXISTS ONLY public.userprompt DROP CONSTRAINT IF EXISTS fk_userpr
 ALTER TABLE IF EXISTS ONLY public.userorganizationquota DROP CONSTRAINT IF EXISTS fk_userorganizationquota_organization;
 ALTER TABLE IF EXISTS ONLY public.uploadedblob DROP CONSTRAINT IF EXISTS fk_uploadedblob_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.uploadedblob DROP CONSTRAINT IF EXISTS fk_uploadedblob_blob_id_imagestorage;
-ALTER TABLE IF EXISTS ONLY public.torrentinfo DROP CONSTRAINT IF EXISTS fk_torrentinfo_storage_id_imagestorage;
 ALTER TABLE IF EXISTS ONLY public.teamsync DROP CONSTRAINT IF EXISTS fk_teamsync_team_id_team;
 ALTER TABLE IF EXISTS ONLY public.teamsync DROP CONSTRAINT IF EXISTS fk_teamsync_service_id_loginservice;
 ALTER TABLE IF EXISTS ONLY public.teammemberinvite DROP CONSTRAINT IF EXISTS fk_teammemberinvite_user_id_user;
@@ -33,20 +32,6 @@ ALTER TABLE IF EXISTS ONLY public.teammember DROP CONSTRAINT IF EXISTS fk_teamme
 ALTER TABLE IF EXISTS ONLY public.teammember DROP CONSTRAINT IF EXISTS fk_teammember_team_id_team;
 ALTER TABLE IF EXISTS ONLY public.team DROP CONSTRAINT IF EXISTS fk_team_role_id_teamrole;
 ALTER TABLE IF EXISTS ONLY public.team DROP CONSTRAINT IF EXISTS fk_team_organization_id_user;
-ALTER TABLE IF EXISTS ONLY public.tagtorepositorytag DROP CONSTRAINT IF EXISTS fk_tagtorepositorytag_tag_id_tag;
-ALTER TABLE IF EXISTS ONLY public.tagtorepositorytag DROP CONSTRAINT IF EXISTS fk_tagtorepositorytag_repository_tag_id_repositorytag;
-ALTER TABLE IF EXISTS ONLY public.tagtorepositorytag DROP CONSTRAINT IF EXISTS fk_tagtorepositorytag_repository_id_repository;
-ALTER TABLE IF EXISTS ONLY public.tagmanifesttomanifest DROP CONSTRAINT IF EXISTS fk_tagmanifesttomanifest_tag_manifest_id_tagmanifest;
-ALTER TABLE IF EXISTS ONLY public.tagmanifesttomanifest DROP CONSTRAINT IF EXISTS fk_tagmanifesttomanifest_manifest_id_manifest;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabelmap DROP CONSTRAINT IF EXISTS fk_tagmanifestlabelmap_tag_manifest_label_id_tagmanifestlabel;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabelmap DROP CONSTRAINT IF EXISTS fk_tagmanifestlabelmap_tag_manifest_id_tagmanifest;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabelmap DROP CONSTRAINT IF EXISTS fk_tagmanifestlabelmap_manifest_label_id_manifestlabel;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabelmap DROP CONSTRAINT IF EXISTS fk_tagmanifestlabelmap_manifest_id_manifest;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabelmap DROP CONSTRAINT IF EXISTS fk_tagmanifestlabelmap_label_id_label;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabel DROP CONSTRAINT IF EXISTS fk_tagmanifestlabel_repository_id_repository;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabel DROP CONSTRAINT IF EXISTS fk_tagmanifestlabel_label_id_label;
-ALTER TABLE IF EXISTS ONLY public.tagmanifestlabel DROP CONSTRAINT IF EXISTS fk_tagmanifestlabel_annotated_id_tagmanifest;
-ALTER TABLE IF EXISTS ONLY public.tagmanifest DROP CONSTRAINT IF EXISTS fk_tagmanifest_tag_id_repositorytag;
 ALTER TABLE IF EXISTS ONLY public.tag DROP CONSTRAINT IF EXISTS fk_tag_tag_kind_id_tagkind;
 ALTER TABLE IF EXISTS ONLY public.tag DROP CONSTRAINT IF EXISTS fk_tag_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.tag DROP CONSTRAINT IF EXISTS fk_tag_manifest_id_manifest;
@@ -56,8 +41,6 @@ ALTER TABLE IF EXISTS ONLY public.star DROP CONSTRAINT IF EXISTS fk_star_reposit
 ALTER TABLE IF EXISTS ONLY public.servicekey DROP CONSTRAINT IF EXISTS fk_servicekey_approval_id_servicekeyapproval;
 ALTER TABLE IF EXISTS ONLY public.robotaccounttoken DROP CONSTRAINT IF EXISTS fk_robotaccounttoken_robot_account_id_user;
 ALTER TABLE IF EXISTS ONLY public.robotaccountmetadata DROP CONSTRAINT IF EXISTS fk_robotaccountmetadata_robot_account_id_user;
-ALTER TABLE IF EXISTS ONLY public.repositorytag DROP CONSTRAINT IF EXISTS fk_repositorytag_repository_id_repository;
-ALTER TABLE IF EXISTS ONLY public.repositorytag DROP CONSTRAINT IF EXISTS fk_repositorytag_image_id_image;
 ALTER TABLE IF EXISTS ONLY public.repositorysize DROP CONSTRAINT IF EXISTS fk_repositorysize_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.repositorysearchscore DROP CONSTRAINT IF EXISTS fk_repositorysearchscore_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.repositorypermission DROP CONSTRAINT IF EXISTS fk_repositorypermission_user_id_user;
@@ -101,6 +84,8 @@ ALTER TABLE IF EXISTS ONLY public.permissionprototype DROP CONSTRAINT IF EXISTS 
 ALTER TABLE IF EXISTS ONLY public.permissionprototype DROP CONSTRAINT IF EXISTS fk_permissionprototype_delegate_user_id_user;
 ALTER TABLE IF EXISTS ONLY public.permissionprototype DROP CONSTRAINT IF EXISTS fk_permissionprototype_delegate_team_id_team;
 ALTER TABLE IF EXISTS ONLY public.permissionprototype DROP CONSTRAINT IF EXISTS fk_permissionprototype_activating_user_id_user;
+ALTER TABLE IF EXISTS ONLY public.organizationrhskus DROP CONSTRAINT IF EXISTS fk_organizationrhskus_userid;
+ALTER TABLE IF EXISTS ONLY public.organizationrhskus DROP CONSTRAINT IF EXISTS fk_organizationrhskus_orgid;
 ALTER TABLE IF EXISTS ONLY public.oauthauthorizationcode DROP CONSTRAINT IF EXISTS fk_oauthauthorizationcode_application_id_oauthapplication;
 ALTER TABLE IF EXISTS ONLY public.oauthapplication DROP CONSTRAINT IF EXISTS fk_oauthapplication_organization_id_user;
 ALTER TABLE IF EXISTS ONLY public.oauthaccesstoken DROP CONSTRAINT IF EXISTS fk_oauthaccesstoken_authorized_user_id_user;
@@ -111,9 +96,6 @@ ALTER TABLE IF EXISTS ONLY public.namespacegeorestriction DROP CONSTRAINT IF EXI
 ALTER TABLE IF EXISTS ONLY public.messages DROP CONSTRAINT IF EXISTS fk_messages_media_type_id_mediatype;
 ALTER TABLE IF EXISTS ONLY public.manifestsecuritystatus DROP CONSTRAINT IF EXISTS fk_manifestsecuritystatus_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.manifestsecuritystatus DROP CONSTRAINT IF EXISTS fk_manifestsecuritystatus_manifest_id_manifest;
-ALTER TABLE IF EXISTS ONLY public.manifestlegacyimage DROP CONSTRAINT IF EXISTS fk_manifestlegacyimage_repository_id_repository;
-ALTER TABLE IF EXISTS ONLY public.manifestlegacyimage DROP CONSTRAINT IF EXISTS fk_manifestlegacyimage_manifest_id_manifest;
-ALTER TABLE IF EXISTS ONLY public.manifestlegacyimage DROP CONSTRAINT IF EXISTS fk_manifestlegacyimage_image_id_image;
 ALTER TABLE IF EXISTS ONLY public.manifestlabel DROP CONSTRAINT IF EXISTS fk_manifestlabel_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.manifestlabel DROP CONSTRAINT IF EXISTS fk_manifestlabel_manifest_id_manifest;
 ALTER TABLE IF EXISTS ONLY public.manifestlabel DROP CONSTRAINT IF EXISTS fk_manifestlabel_label_id_label;
@@ -133,14 +115,9 @@ ALTER TABLE IF EXISTS ONLY public.imagestoragesignature DROP CONSTRAINT IF EXIST
 ALTER TABLE IF EXISTS ONLY public.imagestoragesignature DROP CONSTRAINT IF EXISTS fk_imagestoragesignature_kind_id_imagestoragesignaturekind;
 ALTER TABLE IF EXISTS ONLY public.imagestorageplacement DROP CONSTRAINT IF EXISTS fk_imagestorageplacement_storage_id_imagestorage;
 ALTER TABLE IF EXISTS ONLY public.imagestorageplacement DROP CONSTRAINT IF EXISTS fk_imagestorageplacement_location_id_imagestoragelocation;
-ALTER TABLE IF EXISTS ONLY public.image DROP CONSTRAINT IF EXISTS fk_image_storage_id_imagestorage;
-ALTER TABLE IF EXISTS ONLY public.image DROP CONSTRAINT IF EXISTS fk_image_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.federatedlogin DROP CONSTRAINT IF EXISTS fk_federatedlogin_user_id_user;
 ALTER TABLE IF EXISTS ONLY public.federatedlogin DROP CONSTRAINT IF EXISTS fk_federatedlogin_service_id_loginservice;
 ALTER TABLE IF EXISTS ONLY public.emailconfirmation DROP CONSTRAINT IF EXISTS fk_emailconfirmation_user_id_user;
-ALTER TABLE IF EXISTS ONLY public.derivedstorageforimage DROP CONSTRAINT IF EXISTS fk_derivedstorageforimage_transformation_constraint;
-ALTER TABLE IF EXISTS ONLY public.derivedstorageforimage DROP CONSTRAINT IF EXISTS fk_derivedstorageforimage_source_image_id_image;
-ALTER TABLE IF EXISTS ONLY public.derivedstorageforimage DROP CONSTRAINT IF EXISTS fk_derivedstorageforimage_derivative_id_imagestorage;
 ALTER TABLE IF EXISTS ONLY public.deletedrepository DROP CONSTRAINT IF EXISTS fk_deletedrepository_repository_id_repository;
 ALTER TABLE IF EXISTS ONLY public.deletednamespace DROP CONSTRAINT IF EXISTS fk_deletednamespace_namespace_id_user;
 ALTER TABLE IF EXISTS ONLY public.blobupload DROP CONSTRAINT IF EXISTS fk_blobupload_repository_id_repository;
@@ -325,6 +302,9 @@ DROP INDEX IF EXISTS public.permissionprototype_org_id;
 DROP INDEX IF EXISTS public.permissionprototype_delegate_user_id;
 DROP INDEX IF EXISTS public.permissionprototype_delegate_team_id;
 DROP INDEX IF EXISTS public.permissionprototype_activating_user_id;
+DROP INDEX IF EXISTS public.organizationrhskus_subscription_id_org_id_user_id;
+DROP INDEX IF EXISTS public.organizationrhskus_subscription_id_org_id;
+DROP INDEX IF EXISTS public.organizationrhskus_subscription_id;
 DROP INDEX IF EXISTS public.oauthauthorizationcode_code_name;
 DROP INDEX IF EXISTS public.oauthauthorizationcode_application_id;
 DROP INDEX IF EXISTS public.oauthapplication_organization_id;
@@ -538,6 +518,7 @@ ALTER TABLE IF EXISTS ONLY public.quayrelease DROP CONSTRAINT IF EXISTS pk_quayr
 ALTER TABLE IF EXISTS ONLY public.quayregion DROP CONSTRAINT IF EXISTS pk_quayregion;
 ALTER TABLE IF EXISTS ONLY public.proxycacheconfig DROP CONSTRAINT IF EXISTS pk_proxy_cache_config;
 ALTER TABLE IF EXISTS ONLY public.permissionprototype DROP CONSTRAINT IF EXISTS pk_permissionprototype;
+ALTER TABLE IF EXISTS ONLY public.organizationrhskus DROP CONSTRAINT IF EXISTS pk_organizationrhskus;
 ALTER TABLE IF EXISTS ONLY public.oauthauthorizationcode DROP CONSTRAINT IF EXISTS pk_oauthauthorizationcode;
 ALTER TABLE IF EXISTS ONLY public.oauthapplication DROP CONSTRAINT IF EXISTS pk_oauthapplication;
 ALTER TABLE IF EXISTS ONLY public.oauthaccesstoken DROP CONSTRAINT IF EXISTS pk_oauthaccesstoken;
@@ -640,6 +621,7 @@ ALTER TABLE IF EXISTS public.quayrelease ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.quayregion ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.proxycacheconfig ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.permissionprototype ALTER COLUMN id DROP DEFAULT;
+ALTER TABLE IF EXISTS public.organizationrhskus ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.oauthauthorizationcode ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.oauthapplication ALTER COLUMN id DROP DEFAULT;
 ALTER TABLE IF EXISTS public.oauthaccesstoken ALTER COLUMN id DROP DEFAULT;
@@ -792,6 +774,8 @@ DROP SEQUENCE IF EXISTS public.proxycacheconfig_id_seq;
 DROP TABLE IF EXISTS public.proxycacheconfig;
 DROP SEQUENCE IF EXISTS public.permissionprototype_id_seq;
 DROP TABLE IF EXISTS public.permissionprototype;
+DROP SEQUENCE IF EXISTS public.organizationrhskus_id_seq;
+DROP TABLE IF EXISTS public.organizationrhskus;
 DROP SEQUENCE IF EXISTS public.oauthauthorizationcode_id_seq;
 DROP TABLE IF EXISTS public.oauthauthorizationcode;
 DROP SEQUENCE IF EXISTS public.oauthapplication_id_seq;
@@ -2784,6 +2768,42 @@ ALTER TABLE public.oauthauthorizationcode_id_seq OWNER TO quay;
 --
 
 ALTER SEQUENCE public.oauthauthorizationcode_id_seq OWNED BY public.oauthauthorizationcode.id;
+
+
+--
+-- Name: organizationrhskus; Type: TABLE; Schema: public; Owner: quay
+--
+
+CREATE TABLE public.organizationrhskus (
+    id integer NOT NULL,
+    subscription_id integer NOT NULL,
+    org_id integer NOT NULL,
+    user_id integer NOT NULL
+);
+
+
+ALTER TABLE public.organizationrhskus OWNER TO quay;
+
+--
+-- Name: organizationrhskus_id_seq; Type: SEQUENCE; Schema: public; Owner: quay
+--
+
+CREATE SEQUENCE public.organizationrhskus_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.organizationrhskus_id_seq OWNER TO quay;
+
+--
+-- Name: organizationrhskus_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: quay
+--
+
+ALTER SEQUENCE public.organizationrhskus_id_seq OWNED BY public.organizationrhskus.id;
 
 
 --
@@ -5058,6 +5078,13 @@ ALTER TABLE ONLY public.oauthauthorizationcode ALTER COLUMN id SET DEFAULT nextv
 
 
 --
+-- Name: organizationrhskus id; Type: DEFAULT; Schema: public; Owner: quay
+--
+
+ALTER TABLE ONLY public.organizationrhskus ALTER COLUMN id SET DEFAULT nextval('public.organizationrhskus_id_seq'::regclass);
+
+
+--
 -- Name: permissionprototype id; Type: DEFAULT; Schema: public; Owner: quay
 --
 
@@ -5437,7 +5464,7 @@ COPY public.accesstokenkind (id, name) FROM stdin;
 --
 
 COPY public.alembic_version (version_num) FROM stdin;
-46980ea2dde5
+b82361fba1cd
 \.
 
 
@@ -5666,6 +5693,8 @@ COPY public.imagestorage (id, uuid, image_size, uncompressed_size, uploading, ca
 17	f2598b38-45b0-4aae-9ce5-cf5943b9acde	3276	10752	t	t	sha256:abc70fcc95b2f52b325d69cc5c259dd9babb40a9df152e88b286fada1d3248bd
 18	44f9efe0-cc70-4dfb-afe5-a5db0115ceda	1469	\N	t	t	sha256:df5477cea5582b0ae6a31de2d1c9bbacb506091f42a3b0fe77a209006f409fd8
 19	930c4fa2-ab31-4365-8db5-8a06396cecf7	32	\N	t	t	sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4
+20	a0517e8d-06a1-474a-87e0-10d362679cf9	2457	14848	t	t	sha256:719385e32844401d57ecfd3eacab360bf551a1491c05b85806ed8f1b08d792f6
+21	1b3962c1-6d5b-4ecd-8961-9b88e03f9abe	1470	\N	t	t	sha256:9c7a54a9a43cca047013b82af109fe963fde787f63f9e016fdc3384500c2823d
 \.
 
 
@@ -5710,6 +5739,8 @@ COPY public.imagestorageplacement (id, storage_id, location_id) FROM stdin;
 17	17	9
 18	18	9
 19	19	9
+20	20	9
+21	21	9
 \.
 
 
@@ -5955,6 +5986,18 @@ COPY public.logentry3 (id, kind_id, account_id, performer_id, repository_id, dat
 171	14	4	1	152	2023-01-03 11:24:21.83626	172.18.0.1	{"repo": "repo147", "namespace": "projectquay"}
 172	14	4	1	153	2023-01-03 11:24:21.922767	172.18.0.1	{"repo": "repo148", "namespace": "projectquay"}
 173	14	4	1	154	2023-01-03 11:24:22.021513	172.18.0.1	{"repo": "repo149", "namespace": "projectquay"}
+176	26	1	1	1	2023-07-27 17:30:44.484509	172.18.0.1	{"username": "user1", "repo": "hello-world", "namespace": "user1", "tag": "latest"}
+177	46	1	1	1	2023-07-27 17:30:48.828245	172.18.0.1	{"username": "user1", "repo": "hello-world", "tag": "latest", "manifest_digest": "sha256:f54a58bc1aac5ea1a25d796ae155dc228b3f0e11d046ae276b39c4bf2f13d8c4"}
+180	46	1	1	1	2023-07-27 17:31:10.684526	172.18.0.1	{"username": "user1", "repo": "hello-world", "tag": "latest", "manifest_digest": "sha256:f54a58bc1aac5ea1a25d796ae155dc228b3f0e11d046ae276b39c4bf2f13d8c4"}
+181	32	28	1	\N	2023-08-15 20:40:53.404327	172.19.0.1	{"team": "arsenal"}
+182	10	28	1	5	2023-08-15 20:41:03.55182	172.19.0.1	{"team": "arsenal", "repo": "testrepo", "role": "read"}
+183	32	28	1	\N	2023-08-15 20:43:47.245598	172.19.0.1	{"team": "liverpool"}
+184	14	28	1	156	2023-08-23 17:50:35.613124	172.19.0.1	{"repo": "premierleague", "namespace": "testorg"}
+185	86	33	1	\N	2023-08-23 17:51:10.972139	172.19.0.1	{"email": "collaborator1@gmail.com", "username": "collaborator1"}
+186	32	28	1	\N	2023-08-23 17:51:38.72938	172.19.0.1	{"team": "chelsea"}
+187	10	28	1	156	2023-08-23 17:52:13.669212	172.19.0.1	{"username": "collaborator1", "repo": "premierleague", "namespace": "testorg", "role": "write"}
+188	31	28	1	\N	2023-08-23 17:54:45.980317	172.19.0.1	{"member": "user1", "team": "chelsea"}
+189	31	28	1	\N	2023-08-23 17:55:15.284759	172.19.0.1	{"member": "testorg+testrobot", "team": "chelsea"}
 \.
 
 
@@ -6096,6 +6139,7 @@ COPY public.manifest (id, repository_id, digest, media_type_id, manifest_bytes, 
 9	1	sha256:c7b6944911848ce39b44ed660d95fb54d69bbd531de724c7ce6fc9f743c0b861	16	{\n   "schemaVersion": 2,\n   "mediaType": "application/vnd.docker.distribution.manifest.v2+json",\n   "config": {\n      "mediaType": "application/vnd.docker.container.image.v1+json",\n      "size": 1469,\n      "digest": "sha256:df5477cea5582b0ae6a31de2d1c9bbacb506091f42a3b0fe77a209006f409fd8"\n   },\n   "layers": [\n      {\n         "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",\n         "size": 3276,\n         "digest": "sha256:abc70fcc95b2f52b325d69cc5c259dd9babb40a9df152e88b286fada1d3248bd"\n      }\n   ]\n}	application/vnd.docker.container.image.v1+json	3276
 10	1	sha256:7693efac53eb85ff1afb03f7f2560015c57ac2175707f1f141f31161634c9dba	15	{"manifests":[{"digest":"sha256:f54a58bc1aac5ea1a25d796ae155dc228b3f0e11d046ae276b39c4bf2f13d8c4","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"amd64","os":"linux"},"size":525},{"digest":"sha256:7b8b7289d0536a08eabdf71c20246e23f7116641db7e1d278592236ea4dcb30c","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"arm","os":"linux","variant":"v5"},"size":525},{"digest":"sha256:f130bd2d67e6e9280ac6d0a6c83857bfaf70234e8ef4236876eccfbd30973b1c","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"arm","os":"linux","variant":"v7"},"size":525},{"digest":"sha256:432f982638b3aefab73cc58ab28f5c16e96fdb504e8c134fc58dff4bae8bf338","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"arm64","os":"linux","variant":"v8"},"size":525},{"digest":"sha256:995efde2e81b21d1ea7066aa77a59298a62a9e9fbb4b77f36c189774ec9b1089","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"386","os":"linux"},"size":525},{"digest":"sha256:eb11b1a194ff8e236a01eff392c4e1296a53b0fb4780d8b0382f7996a15d5392","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"mips64le","os":"linux"},"size":525},{"digest":"sha256:b836bb24a270b9cc935962d8228517fde0f16990e88893d935efcb1b14c0017a","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"ppc64le","os":"linux"},"size":525},{"digest":"sha256:98c9722322be649df94780d3fbe594fce7996234b259f27eac9428b84050c849","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"riscv64","os":"linux"},"size":525},{"digest":"sha256:c7b6944911848ce39b44ed660d95fb54d69bbd531de724c7ce6fc9f743c0b861","mediaType":"application\\/vnd.docker.distribution.manifest.v2+json","platform":{"architecture":"s390x","os":"linux"},"size":525}],"mediaType":"application\\/vnd.docker.distribution.manifest.list.v2+json","schemaVersion":2}	\N	0
 11	155	sha256:f54a58bc1aac5ea1a25d796ae155dc228b3f0e11d046ae276b39c4bf2f13d8c4	16	{\n   "schemaVersion": 2,\n   "mediaType": "application/vnd.docker.distribution.manifest.v2+json",\n   "config": {\n      "mediaType": "application/vnd.docker.container.image.v1+json",\n      "size": 1469,\n      "digest": "sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412"\n   },\n   "layers": [\n      {\n         "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",\n         "size": 2479,\n         "digest": "sha256:2db29710123e3e53a794f2694094b9b4338aa9ee5c40b930cb8063a1be392c54"\n      }\n   ]\n}	application/vnd.docker.container.image.v1+json	2479
+12	1	sha256:7e9b6e7ba2842c91cf49f3e214d04a7a496f8214356f41d81a6e6dcad11f11e3	16	{\n   "schemaVersion": 2,\n   "mediaType": "application/vnd.docker.distribution.manifest.v2+json",\n   "config": {\n      "mediaType": "application/vnd.docker.container.image.v1+json",\n      "size": 1470,\n      "digest": "sha256:9c7a54a9a43cca047013b82af109fe963fde787f63f9e016fdc3384500c2823d"\n   },\n   "layers": [\n      {\n         "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",\n         "size": 2457,\n         "digest": "sha256:719385e32844401d57ecfd3eacab360bf551a1491c05b85806ed8f1b08d792f6"\n      }\n   ]\n}	application/vnd.docker.container.image.v1+json	2457
 \.
 
 
@@ -6124,6 +6168,8 @@ COPY public.manifestblob (id, repository_id, manifest_id, blob_id) FROM stdin;
 18	1	9	18
 19	155	11	1
 20	155	11	2
+21	1	12	20
+22	1	12	21
 \.
 
 
@@ -6272,6 +6318,14 @@ COPY public.oauthauthorizationcode (id, application_id, scope, data, code_creden
 
 
 --
+-- Data for Name: organizationrhskus; Type: TABLE DATA; Schema: public; Owner: quay
+--
+
+COPY public.organizationrhskus (id, subscription_id, org_id, user_id) FROM stdin;
+\.
+
+
+--
 -- Data for Name: permissionprototype; Type: TABLE DATA; Schema: public; Owner: quay
 --
 
@@ -6316,8 +6370,8 @@ COPY public.quayservice (id, name) FROM stdin;
 --
 
 COPY public.queueitem (id, queue_name, body, available_after, available, processing_expires, retries_remaining, state_id) FROM stdin;
-1	namespacegc/2/	{"marker_id": 1, "original_username": "quay"}	2023-06-28 18:17:46.058418	t	2023-06-28 21:12:45.983351	5	f4026e00-acc1-4634-b560-7b9dfe4ea2c0
 2	namespacegc/3/	{"marker_id": 2, "original_username": "clair"}	2023-06-28 18:17:51.112431	t	2023-06-28 21:12:51.080949	5	1f7f0b49-2e34-4a00-8414-2559e4bbe63f
+1	namespacegc/2/	{"marker_id": 1, "original_username": "quay"}	2023-08-25 15:22:54.808849	t	2023-08-25 18:17:54.783824	5	89f5e206-0b48-4227-8e7f-15e9a549fa2e
 \.
 
 
@@ -6547,6 +6601,7 @@ COPY public.repository (id, namespace_user_id, name, visibility_id, description,
 153	4	repo148	1	This is the description of repo148	0c796577-7825-4c9d-a4fb-2a7866544248	1	f	0
 154	4	repo149	1	This is the description of repo149	8db24323-26f1-4fc1-9a10-1ac9d6f768d5	1	f	0
 155	32	hello-world	1		730ebab8-f2ab-4e55-9c9d-f064d11f68d6	1	f	0
+156	28	premierleague	1		94590e48-ff0e-4eb0-a74d-84416dedf157	1	f	0
 \.
 
 
@@ -6710,6 +6765,7 @@ COPY public.repositoryactioncount (id, repository_id, count, date) FROM stdin;
 153	153	0	2023-01-02
 154	154	0	2023-01-02
 155	155	0	2023-06-27
+156	156	0	2023-08-22
 \.
 
 
@@ -6923,6 +6979,9 @@ COPY public.repositorypermission (id, team_id, user_id, repository_id, role_id) 
 156	\N	1	153	1
 157	\N	1	154	1
 158	\N	29	155	1
+159	31	\N	5	3
+160	\N	1	156	1
+161	\N	33	156	2
 \.
 
 
@@ -7086,6 +7145,7 @@ COPY public.repositorysearchscore (id, repository_id, score, last_updated) FROM 
 153	153	0	\N
 154	154	0	\N
 155	155	0	\N
+156	156	0	\N
 \.
 
 
@@ -7319,7 +7379,6 @@ COPY public.star (id, user_id, repository_id, created) FROM stdin;
 --
 
 COPY public.tag (id, name, repository_id, manifest_id, lifetime_start_ms, lifetime_end_ms, hidden, reversion, tag_kind_id, linked_tag_id) FROM stdin;
-1	latest	1	1	1667589234345	\N	f	f	1	\N
 2	$temp-14b356fd-6475-4036-8a51-6222469ec319	1	2	1667589325995	1667592925995	t	f	1	\N
 3	$temp-4a1787d7-7f4c-4bb8-84d7-23e518be2e07	1	3	1667589327671	1667592927671	t	f	1	\N
 4	$temp-9f0521e7-4e36-4934-b467-0358b158faad	1	4	1667589329223	1667592929223	t	f	1	\N
@@ -7330,6 +7389,12 @@ COPY public.tag (id, name, repository_id, manifest_id, lifetime_start_ms, lifeti
 9	$temp-64f33f3a-8551-49da-b36c-e4ab3a47c247	1	9	1667589337525	1667592937525	t	f	1	\N
 10	manifestlist	1	10	1667589337924	\N	f	f	1	\N
 11	latest	155	11	1687976145896	\N	f	f	1	\N
+1	latest	1	1	1667589234345	1690479044462	f	f	1	\N
+12	$temp-224d812a-ca19-4ccb-92c2-9a04a21924a7	1	1	1690479048789	1690479348789	t	f	1	\N
+13	latest	1	1	1690479048814	1690479058287	f	t	1	\N
+15	$temp-cfb6beff-645a-479d-be37-73ce2631b3c7	1	1	1690479070649	1690479370649	t	f	1	\N
+14	latest	1	12	1690479058287	1690479070667	f	f	1	\N
+16	latest	1	1	1690479070667	\N	f	t	1	\N
 \.
 
 
@@ -7415,6 +7480,9 @@ COPY public.team (id, name, organization_id, role_id, description) FROM stdin;
 28	testteam	28	3	
 29	testteam2	28	3	
 30	owners	32	1	
+31	arsenal	28	3	
+32	liverpool	28	3	
+33	chelsea	28	3	
 \.
 
 
@@ -7450,6 +7518,8 @@ COPY public.teammember (id, user_id, team_id) FROM stdin;
 27	1	27
 28	29	28
 29	29	30
+30	1	33
+31	30	33
 \.
 
 
@@ -7513,6 +7583,8 @@ COPY public.uploadedblob (id, repository_id, blob_id, uploaded_at, expires_at) F
 18	1	18	2022-11-04 19:15:37.292848	2022-11-04 20:15:37.292747
 19	155	1	2023-06-28 18:15:45.607136	2023-06-28 19:15:45.607116
 20	155	2	2023-06-28 18:15:45.812791	2023-06-28 19:15:45.812764
+21	1	20	2023-07-27 17:30:57.985684	2023-07-27 18:30:57.98565
+22	1	21	2023-07-27 17:30:58.184317	2023-07-27 18:30:58.184126
 \.
 
 
@@ -7553,6 +7625,7 @@ COPY public."user" (id, uuid, username, password_hash, email, verified, stripe_i
 31	87860588-5674-4bc4-a297-abda8f99e877	testorg+testrobot2	\N	c117d71c-c3cb-4513-ab37-32f0dcb16007	f	\N	f	t	f	0	2022-11-30 21:23:53.656399	1209600	t	\N	\N	\N	\N	\N	\N	2022-11-30 21:23:53.656402	\N
 29	f96f1124-ae26-4ea6-a73b-f4b0d87e6dc0	user2	$2b$12$XA6iXw/.Ug.F8s7bWVz3VuWcOz0SVKsmnvkgl.l6ZnmWWllTgzLT6	user2@redhat.com	t	\N	f	f	f	0	2022-11-29 13:47:39.871581	1209600	t	\N	\N	\N	\N	\N	\N	2022-11-29 13:47:39.87159	\N
 32	80d4d7c4-c3f0-442b-94a6-1e151aca9ecd	user2org1	\N	user2org1@redhat.com	f	\N	t	f	f	0	2023-06-28 18:15:16.210544	1209600	t	\N	\N	\N	\N	\N	\N	2023-06-28 18:15:16.210558	\N
+33	e53eca92-4bbe-4853-b047-ceb86c1bb12a	collaborator1	$2b$12$R0hWaRhKGFdJ16WCJ7KUzesYIxzF0o57Lq9.pUhlc4EQTXUTXmrw2	collaborator1@gmail.com	t	\N	f	f	f	0	2023-08-23 17:51:10.548163	1209600	t	\N	\N	\N	\N	\N	\N	2023-08-23 17:51:10.548165	\N
 \.
 
 
@@ -7689,7 +7762,7 @@ SELECT pg_catalog.setval('public.appspecificauthtoken_id_seq', 1, false);
 -- Name: blobupload_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.blobupload_id_seq', 20, true);
+SELECT pg_catalog.setval('public.blobupload_id_seq', 22, true);
 
 
 --
@@ -7766,7 +7839,7 @@ SELECT pg_catalog.setval('public.image_id_seq', 1, false);
 -- Name: imagestorage_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.imagestorage_id_seq', 19, true);
+SELECT pg_catalog.setval('public.imagestorage_id_seq', 21, true);
 
 
 --
@@ -7780,7 +7853,7 @@ SELECT pg_catalog.setval('public.imagestoragelocation_id_seq', 9, true);
 -- Name: imagestorageplacement_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.imagestorageplacement_id_seq', 19, true);
+SELECT pg_catalog.setval('public.imagestorageplacement_id_seq', 21, true);
 
 
 --
@@ -7829,7 +7902,7 @@ SELECT pg_catalog.setval('public.logentry2_id_seq', 1, false);
 -- Name: logentry3_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.logentry3_id_seq', 173, true);
+SELECT pg_catalog.setval('public.logentry3_id_seq', 189, true);
 
 
 --
@@ -7857,14 +7930,14 @@ SELECT pg_catalog.setval('public.loginservice_id_seq', 7, true);
 -- Name: manifest_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.manifest_id_seq', 11, true);
+SELECT pg_catalog.setval('public.manifest_id_seq', 12, true);
 
 
 --
 -- Name: manifestblob_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.manifestblob_id_seq', 20, true);
+SELECT pg_catalog.setval('public.manifestblob_id_seq', 22, true);
 
 
 --
@@ -7920,7 +7993,7 @@ SELECT pg_catalog.setval('public.namespacegeorestriction_id_seq', 1, false);
 -- Name: notification_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.notification_id_seq', 1, false);
+SELECT pg_catalog.setval('public.notification_id_seq', 1, true);
 
 
 --
@@ -7949,6 +8022,13 @@ SELECT pg_catalog.setval('public.oauthapplication_id_seq', 1, false);
 --
 
 SELECT pg_catalog.setval('public.oauthauthorizationcode_id_seq', 1, false);
+
+
+--
+-- Name: organizationrhskus_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
+--
+
+SELECT pg_catalog.setval('public.organizationrhskus_id_seq', 1, false);
 
 
 --
@@ -8053,14 +8133,14 @@ SELECT pg_catalog.setval('public.repomirrorrule_id_seq', 1, false);
 -- Name: repository_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.repository_id_seq', 155, true);
+SELECT pg_catalog.setval('public.repository_id_seq', 156, true);
 
 
 --
 -- Name: repositoryactioncount_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.repositoryactioncount_id_seq', 155, true);
+SELECT pg_catalog.setval('public.repositoryactioncount_id_seq', 156, true);
 
 
 --
@@ -8102,14 +8182,14 @@ SELECT pg_catalog.setval('public.repositorynotification_id_seq', 5, true);
 -- Name: repositorypermission_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.repositorypermission_id_seq', 158, true);
+SELECT pg_catalog.setval('public.repositorypermission_id_seq', 161, true);
 
 
 --
 -- Name: repositorysearchscore_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.repositorysearchscore_id_seq', 155, true);
+SELECT pg_catalog.setval('public.repositorysearchscore_id_seq', 156, true);
 
 
 --
@@ -8151,14 +8231,14 @@ SELECT pg_catalog.setval('public.role_id_seq', 3, true);
 -- Name: servicekey_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.servicekey_id_seq', 1, false);
+SELECT pg_catalog.setval('public.servicekey_id_seq', 1, true);
 
 
 --
 -- Name: servicekeyapproval_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.servicekeyapproval_id_seq', 1, false);
+SELECT pg_catalog.setval('public.servicekeyapproval_id_seq', 1, true);
 
 
 --
@@ -8172,7 +8252,7 @@ SELECT pg_catalog.setval('public.star_id_seq', 1, false);
 -- Name: tag_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.tag_id_seq', 11, true);
+SELECT pg_catalog.setval('public.tag_id_seq', 16, true);
 
 
 --
@@ -8221,14 +8301,14 @@ SELECT pg_catalog.setval('public.tagtorepositorytag_id_seq', 1, false);
 -- Name: team_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.team_id_seq', 30, true);
+SELECT pg_catalog.setval('public.team_id_seq', 33, true);
 
 
 --
 -- Name: teammember_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.teammember_id_seq', 29, true);
+SELECT pg_catalog.setval('public.teammember_id_seq', 31, true);
 
 
 --
@@ -8263,14 +8343,14 @@ SELECT pg_catalog.setval('public.torrentinfo_id_seq', 1, false);
 -- Name: uploadedblob_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.uploadedblob_id_seq', 20, true);
+SELECT pg_catalog.setval('public.uploadedblob_id_seq', 22, true);
 
 
 --
 -- Name: user_id_seq; Type: SEQUENCE SET; Schema: public; Owner: quay
 --
 
-SELECT pg_catalog.setval('public.user_id_seq', 32, true);
+SELECT pg_catalog.setval('public.user_id_seq', 33, true);
 
 
 --
@@ -8714,6 +8794,14 @@ ALTER TABLE ONLY public.oauthapplication
 
 ALTER TABLE ONLY public.oauthauthorizationcode
     ADD CONSTRAINT pk_oauthauthorizationcode PRIMARY KEY (id);
+
+
+--
+-- Name: organizationrhskus pk_organizationrhskus; Type: CONSTRAINT; Schema: public; Owner: quay
+--
+
+ALTER TABLE ONLY public.organizationrhskus
+    ADD CONSTRAINT pk_organizationrhskus PRIMARY KEY (id);
 
 
 --
@@ -10259,6 +10347,27 @@ CREATE UNIQUE INDEX oauthauthorizationcode_code_name ON public.oauthauthorizatio
 
 
 --
+-- Name: organizationrhskus_subscription_id; Type: INDEX; Schema: public; Owner: quay
+--
+
+CREATE UNIQUE INDEX organizationrhskus_subscription_id ON public.organizationrhskus USING btree (subscription_id);
+
+
+--
+-- Name: organizationrhskus_subscription_id_org_id; Type: INDEX; Schema: public; Owner: quay
+--
+
+CREATE UNIQUE INDEX organizationrhskus_subscription_id_org_id ON public.organizationrhskus USING btree (subscription_id, org_id);
+
+
+--
+-- Name: organizationrhskus_subscription_id_org_id_user_id; Type: INDEX; Schema: public; Owner: quay
+--
+
+CREATE UNIQUE INDEX organizationrhskus_subscription_id_org_id_user_id ON public.organizationrhskus USING btree (subscription_id, org_id, user_id);
+
+
+--
 -- Name: permissionprototype_activating_user_id; Type: INDEX; Schema: public; Owner: quay
 --
 
@@ -11569,30 +11678,6 @@ ALTER TABLE ONLY public.deletedrepository
 
 
 --
--- Name: derivedstorageforimage fk_derivedstorageforimage_derivative_id_imagestorage; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.derivedstorageforimage
-    ADD CONSTRAINT fk_derivedstorageforimage_derivative_id_imagestorage FOREIGN KEY (derivative_id) REFERENCES public.imagestorage(id);
-
-
---
--- Name: derivedstorageforimage fk_derivedstorageforimage_source_image_id_image; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.derivedstorageforimage
-    ADD CONSTRAINT fk_derivedstorageforimage_source_image_id_image FOREIGN KEY (source_image_id) REFERENCES public.image(id);
-
-
---
--- Name: derivedstorageforimage fk_derivedstorageforimage_transformation_constraint; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.derivedstorageforimage
-    ADD CONSTRAINT fk_derivedstorageforimage_transformation_constraint FOREIGN KEY (transformation_id) REFERENCES public.imagestoragetransformation(id);
-
-
---
 -- Name: emailconfirmation fk_emailconfirmation_user_id_user; Type: FK CONSTRAINT; Schema: public; Owner: quay
 --
 
@@ -11614,22 +11699,6 @@ ALTER TABLE ONLY public.federatedlogin
 
 ALTER TABLE ONLY public.federatedlogin
     ADD CONSTRAINT fk_federatedlogin_user_id_user FOREIGN KEY (user_id) REFERENCES public."user"(id);
-
-
---
--- Name: image fk_image_repository_id_repository; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.image
-    ADD CONSTRAINT fk_image_repository_id_repository FOREIGN KEY (repository_id) REFERENCES public.repository(id);
-
-
---
--- Name: image fk_image_storage_id_imagestorage; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.image
-    ADD CONSTRAINT fk_image_storage_id_imagestorage FOREIGN KEY (storage_id) REFERENCES public.imagestorage(id);
 
 
 --
@@ -11785,30 +11854,6 @@ ALTER TABLE ONLY public.manifestlabel
 
 
 --
--- Name: manifestlegacyimage fk_manifestlegacyimage_image_id_image; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.manifestlegacyimage
-    ADD CONSTRAINT fk_manifestlegacyimage_image_id_image FOREIGN KEY (image_id) REFERENCES public.image(id);
-
-
---
--- Name: manifestlegacyimage fk_manifestlegacyimage_manifest_id_manifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.manifestlegacyimage
-    ADD CONSTRAINT fk_manifestlegacyimage_manifest_id_manifest FOREIGN KEY (manifest_id) REFERENCES public.manifest(id);
-
-
---
--- Name: manifestlegacyimage fk_manifestlegacyimage_repository_id_repository; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.manifestlegacyimage
-    ADD CONSTRAINT fk_manifestlegacyimage_repository_id_repository FOREIGN KEY (repository_id) REFERENCES public.repository(id);
-
-
---
 -- Name: manifestsecuritystatus fk_manifestsecuritystatus_manifest_id_manifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
 --
 
@@ -11886,6 +11931,22 @@ ALTER TABLE ONLY public.oauthapplication
 
 ALTER TABLE ONLY public.oauthauthorizationcode
     ADD CONSTRAINT fk_oauthauthorizationcode_application_id_oauthapplication FOREIGN KEY (application_id) REFERENCES public.oauthapplication(id);
+
+
+--
+-- Name: organizationrhskus fk_organizationrhskus_orgid; Type: FK CONSTRAINT; Schema: public; Owner: quay
+--
+
+ALTER TABLE ONLY public.organizationrhskus
+    ADD CONSTRAINT fk_organizationrhskus_orgid FOREIGN KEY (org_id) REFERENCES public."user"(id);
+
+
+--
+-- Name: organizationrhskus fk_organizationrhskus_userid; Type: FK CONSTRAINT; Schema: public; Owner: quay
+--
+
+ALTER TABLE ONLY public.organizationrhskus
+    ADD CONSTRAINT fk_organizationrhskus_userid FOREIGN KEY (user_id) REFERENCES public."user"(id);
 
 
 --
@@ -12233,22 +12294,6 @@ ALTER TABLE ONLY public.repositorysize
 
 
 --
--- Name: repositorytag fk_repositorytag_image_id_image; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.repositorytag
-    ADD CONSTRAINT fk_repositorytag_image_id_image FOREIGN KEY (image_id) REFERENCES public.image(id);
-
-
---
--- Name: repositorytag fk_repositorytag_repository_id_repository; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.repositorytag
-    ADD CONSTRAINT fk_repositorytag_repository_id_repository FOREIGN KEY (repository_id) REFERENCES public.repository(id);
-
-
---
 -- Name: robotaccountmetadata fk_robotaccountmetadata_robot_account_id_user; Type: FK CONSTRAINT; Schema: public; Owner: quay
 --
 
@@ -12321,118 +12366,6 @@ ALTER TABLE ONLY public.tag
 
 
 --
--- Name: tagmanifest fk_tagmanifest_tag_id_repositorytag; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifest
-    ADD CONSTRAINT fk_tagmanifest_tag_id_repositorytag FOREIGN KEY (tag_id) REFERENCES public.repositorytag(id);
-
-
---
--- Name: tagmanifestlabel fk_tagmanifestlabel_annotated_id_tagmanifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabel
-    ADD CONSTRAINT fk_tagmanifestlabel_annotated_id_tagmanifest FOREIGN KEY (annotated_id) REFERENCES public.tagmanifest(id);
-
-
---
--- Name: tagmanifestlabel fk_tagmanifestlabel_label_id_label; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabel
-    ADD CONSTRAINT fk_tagmanifestlabel_label_id_label FOREIGN KEY (label_id) REFERENCES public.label(id);
-
-
---
--- Name: tagmanifestlabel fk_tagmanifestlabel_repository_id_repository; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabel
-    ADD CONSTRAINT fk_tagmanifestlabel_repository_id_repository FOREIGN KEY (repository_id) REFERENCES public.repository(id);
-
-
---
--- Name: tagmanifestlabelmap fk_tagmanifestlabelmap_label_id_label; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabelmap
-    ADD CONSTRAINT fk_tagmanifestlabelmap_label_id_label FOREIGN KEY (label_id) REFERENCES public.label(id);
-
-
---
--- Name: tagmanifestlabelmap fk_tagmanifestlabelmap_manifest_id_manifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabelmap
-    ADD CONSTRAINT fk_tagmanifestlabelmap_manifest_id_manifest FOREIGN KEY (manifest_id) REFERENCES public.manifest(id);
-
-
---
--- Name: tagmanifestlabelmap fk_tagmanifestlabelmap_manifest_label_id_manifestlabel; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabelmap
-    ADD CONSTRAINT fk_tagmanifestlabelmap_manifest_label_id_manifestlabel FOREIGN KEY (manifest_label_id) REFERENCES public.manifestlabel(id);
-
-
---
--- Name: tagmanifestlabelmap fk_tagmanifestlabelmap_tag_manifest_id_tagmanifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabelmap
-    ADD CONSTRAINT fk_tagmanifestlabelmap_tag_manifest_id_tagmanifest FOREIGN KEY (tag_manifest_id) REFERENCES public.tagmanifest(id);
-
-
---
--- Name: tagmanifestlabelmap fk_tagmanifestlabelmap_tag_manifest_label_id_tagmanifestlabel; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifestlabelmap
-    ADD CONSTRAINT fk_tagmanifestlabelmap_tag_manifest_label_id_tagmanifestlabel FOREIGN KEY (tag_manifest_label_id) REFERENCES public.tagmanifestlabel(id);
-
-
---
--- Name: tagmanifesttomanifest fk_tagmanifesttomanifest_manifest_id_manifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifesttomanifest
-    ADD CONSTRAINT fk_tagmanifesttomanifest_manifest_id_manifest FOREIGN KEY (manifest_id) REFERENCES public.manifest(id);
-
-
---
--- Name: tagmanifesttomanifest fk_tagmanifesttomanifest_tag_manifest_id_tagmanifest; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagmanifesttomanifest
-    ADD CONSTRAINT fk_tagmanifesttomanifest_tag_manifest_id_tagmanifest FOREIGN KEY (tag_manifest_id) REFERENCES public.tagmanifest(id);
-
-
---
--- Name: tagtorepositorytag fk_tagtorepositorytag_repository_id_repository; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagtorepositorytag
-    ADD CONSTRAINT fk_tagtorepositorytag_repository_id_repository FOREIGN KEY (repository_id) REFERENCES public.repository(id);
-
-
---
--- Name: tagtorepositorytag fk_tagtorepositorytag_repository_tag_id_repositorytag; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagtorepositorytag
-    ADD CONSTRAINT fk_tagtorepositorytag_repository_tag_id_repositorytag FOREIGN KEY (repository_tag_id) REFERENCES public.repositorytag(id);
-
-
---
--- Name: tagtorepositorytag fk_tagtorepositorytag_tag_id_tag; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.tagtorepositorytag
-    ADD CONSTRAINT fk_tagtorepositorytag_tag_id_tag FOREIGN KEY (tag_id) REFERENCES public.tag(id);
-
-
---
 -- Name: team fk_team_organization_id_user; Type: FK CONSTRAINT; Schema: public; Owner: quay
 --
 
@@ -12502,14 +12435,6 @@ ALTER TABLE ONLY public.teamsync
 
 ALTER TABLE ONLY public.teamsync
     ADD CONSTRAINT fk_teamsync_team_id_team FOREIGN KEY (team_id) REFERENCES public.team(id);
-
-
---
--- Name: torrentinfo fk_torrentinfo_storage_id_imagestorage; Type: FK CONSTRAINT; Schema: public; Owner: quay
---
-
-ALTER TABLE ONLY public.torrentinfo
-    ADD CONSTRAINT fk_torrentinfo_storage_id_imagestorage FOREIGN KEY (storage_id) REFERENCES public.imagestorage(id);
 
 
 --

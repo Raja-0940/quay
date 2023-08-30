@@ -1,7 +1,8 @@
-from typing import Union, List
 import os
 import os.path
 import sys
+from typing import List, Union
+
 import jinja2
 
 QUAYPATH = os.getenv("QUAYPATH", ".")
@@ -87,8 +88,8 @@ def config_services():
         "manifestbackfillworker": {"autostart": "false"},
         "securityscanningnotificationworker": {"autostart": "false"},
         "config-editor": {"autostart": "true"},
-        "quotatotalworker": {"autostart": "true"},
-        "quotaregistrysizeworker": {"autostart": "true"},
+        "quotatotalworker": {"autostart": "false"},
+        "quotaregistrysizeworker": {"autostart": "false"},
     }
 
 
