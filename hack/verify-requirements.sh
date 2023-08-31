@@ -7,7 +7,7 @@ trap 'rc=$?; rm -rf "$TMP"; exit $rc' EXIT
 
 sed -n 's/ *#.*//; s/\[[^]]*\]//g; s/^pip==.*/pip/; /./p' ./requirements.txt | sort >"$TMP_REQUIREMENTS"
 
-pip install --target="$TMP_PACKAGESDIR" -r ./requirements.txt --ignore-installed
+pip install --target="$TMP_PACKAGESDIR" -r ./requirements.txt --ignore-installed cryptography
 pip freeze --path="$TMP_PACKAGESDIR" --all | sed 's/^pip==.*/pip/' | sort >"$TMP_PIP_FREEZE"
 
 if ! diff -u "$TMP_REQUIREMENTS" "$TMP_PIP_FREEZE"; then
