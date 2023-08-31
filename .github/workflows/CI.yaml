@@ -162,6 +162,7 @@ jobs:
             apt-get -y install python3-dev python3-setuptools; \
             pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0; \
             ./hack/verify-requirements.sh; \
+            pip install cryptography==41.0.3 --ignore-installed; \
             pip install -r ./requirements-dev.txt --ignore-installed; \
             make types-test;'
         else
