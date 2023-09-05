@@ -1,6 +1,9 @@
 name: Multiarch build
 
 on:
+  push:
+    branches:
+    - "dev-master-5"      
   workflow_dispatch:
       
 env:
