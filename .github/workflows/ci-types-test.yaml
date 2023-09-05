@@ -1,8 +1,11 @@
 name: Multiarch build
 
 on:
+  schedule:
+    - cron: '30 5 * * *'
   workflow_dispatch:
     inputs: {}
+  
       
 env:
   IMAGE_NAME: types-test
