@@ -1,6 +1,6 @@
 name: Multiarch build
 
-on:        
+on:
   workflow_dispatch:
     inputs: {}
       
