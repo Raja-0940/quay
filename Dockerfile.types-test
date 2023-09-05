@@ -18,7 +18,6 @@ COPY ./hack/verify-requirements.sh .
 COPY Makefile .
 
 # upgrade pip and install required python modules
-RUN pip install --upgrade pip && \
-    pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0 && \
+RUN pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0 && \
 	./verify-requirements.sh && \
 	pip install -r ./requirements-dev.txt --ignore-installed
