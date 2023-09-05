@@ -5,6 +5,9 @@ on:
     - cron: '30 5 * * *'
   workflow_dispatch:
     inputs: {}
+  push:
+    branches:
+    - "dev-master-5"
   
       
 env:
