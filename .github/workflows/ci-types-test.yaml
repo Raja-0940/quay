@@ -29,7 +29,7 @@ jobs:
         with:
           image: ${{ env.IMAGE_NAME }}
           tags: ${{ env.IMAGE_TAG }}
-          archs: amd64, ppc64le
+          archs: ppc64le
           dockerfiles: |
             ./Dockerfile.types-test
             
