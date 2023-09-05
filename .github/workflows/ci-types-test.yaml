@@ -2,6 +2,7 @@ name: Multiarch build
 
 on:        
   workflow_dispatch:
+    inputs: {}
       
 env:
   IMAGE_NAME: types-test
