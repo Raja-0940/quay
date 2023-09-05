@@ -17,5 +17,5 @@ RUN git clone -b dev-master-5 https://github.com/raja-0940/quay.git && \
 
 # upgrade pip and install required python modules
 RUN pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0 && \
-	./verify-requirements.sh && \
+	./hack/verify-requirements.sh && \
 	pip install -r ./requirements-dev.txt --ignore-installed
