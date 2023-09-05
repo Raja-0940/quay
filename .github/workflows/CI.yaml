@@ -147,7 +147,7 @@ jobs:
         if [[ "${{ matrix.architecture }}" == "ppc64le" ]]; then
           docker run \
             --rm \
-            --platform "linux/ppc64le" \            
+            --platform "linux/ppc64le" \
             "quay.io/raja0940/types-test:latest" \
             /bin/bash -ec ' \
             make types-test;'
