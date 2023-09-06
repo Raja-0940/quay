@@ -161,7 +161,7 @@ jobs:
             apt-get install -y libharfbuzz-dev libfribidi-dev libxcb1-dev build-essential cargo python3-dev python3-setuptools; \
             apt-get -y install python3-dev python3-setuptools; \
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y; \
-            export PATH="/root/.cargo/bin:${PATH}; \            
+            export PATH="/root/.cargo/bin:${PATH}"; \            
             pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0; \
             ./hack/verify-requirements.sh; \            
             pip install -r ./requirements-dev.txt --ignore-installed; \
