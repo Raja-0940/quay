@@ -148,7 +148,7 @@ jobs:
           docker run \
             --rm \
             --platform "linux/ppc64le" \
-            "quay.io/raja0940/types-test:latest" \
+            "quay.io/raja0940/types-test:v2-latest" \
             /bin/bash -ec ' \
             make types-test;'
         else
