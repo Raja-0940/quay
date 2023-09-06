@@ -1,4 +1,4 @@
-FROM python:3.9
+FROM python:3.9 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -10,19 +10,27 @@ RUN apt-get update && apt-get install -y \
 	libxml2 libxslt1.1 libgpgme-dev libldap2-dev libsasl2-dev swig libtiff5-dev libopenjp2-7-dev \
 	libfreetype6-dev liblcms2-dev libwebp-dev tcl8.6-dev tk8.6-dev python3-tk \
 	libharfbuzz-dev libfribidi-dev libxcb1-dev build-essential cargo python3-dev python3-setuptools
-	
-# Clone quay git repository
-RUN git clone -b dev-master-5 https://github.com/raja-0940/quay.git
 
-WORKDIR quay/
 
 # Install Rust using rustup
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Clone quay git repository
+RUN git clone -b dev-master-5 https://github.com/raja-0940/quay.git
+WORKDIR quay/
+
 # upgrade pip and install required python modules
 RUN pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0 && \
 	./hack/verify-requirements.sh && \
 	pip install -r ./requirements-dev.txt --ignore-installed
+
+FROM python:3.9 AS runner
+
+WORKDIR quay/
+
+COPY --from=build /user/local/lib/python3.9/site-packages /user/local/lib/python3.9/site-packages
+
+COPY . .
 
 CMD ["bash"]
