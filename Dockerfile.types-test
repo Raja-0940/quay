@@ -1,4 +1,4 @@
-FROM python:3.9 AS build
+FROM python:3.9
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -24,13 +24,5 @@ WORKDIR quay/
 RUN pip install -U setuptools wheel Cython==3.0.0a9 launchpadlib==1.11.0 && \
 	./hack/verify-requirements.sh && \
 	pip install -r ./requirements-dev.txt --ignore-installed
-
-FROM python:3.9 AS runner
-
-WORKDIR quay/
-
-COPY --from=build /user/local/lib/python3.9/site-packages /user/local/lib/python3.9/site-packages
-
-COPY . .
 
 CMD ["bash"]
