@@ -75,7 +75,7 @@ export default function DeleteRepository({org, repo}: DeleteRepositoryProps) {
         <TextInput
           value={repoNameInput}
           type="text"
-          onChange={(value) => setRepoNameInput(value.trim())}
+          onChange={(_event, value) => setRepoNameInput(value.trim())}
           aria-label="repo-delete-name-input"
           placeholder="Enter repository here"
         />
@@ -86,7 +86,11 @@ export default function DeleteRepository({org, repo}: DeleteRepositoryProps) {
         title="Deleting a repository cannot be undone. Here be dragons!"
         style={{marginBottom: '1em'}}
       />
-      <Button variant="danger" onClick={() => setIsModalOpen(true)}>
+      <Button
+        variant="danger"
+        test-id="delete-repository-btn"
+        onClick={() => setIsModalOpen(true)}
+      >
         Delete Repository
       </Button>
     </>

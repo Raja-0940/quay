@@ -3,13 +3,13 @@ DESCRIPTOR_SIZE_KEY = "size"
 DESCRIPTOR_DIGEST_KEY = "digest"
 DESCRIPTOR_URLS_KEY = "urls"
 DESCRIPTOR_ANNOTATIONS_KEY = "annotations"
+DESCRIPTOR_ARTIFACT_KEY = "artifactType"
 
 
 def get_descriptor_schema(
     allowed_media_types,
     additional_properties=None,
     additional_required=None,
-    ignore_unknown_mediatypes=False,
 ):
     properties = {
         DESCRIPTOR_MEDIATYPE_KEY: {
@@ -40,10 +40,11 @@ def get_descriptor_schema(
                 "type": "string",
             },
         },
+        DESCRIPTOR_ARTIFACT_KEY: {
+            "type": "string",
+            "description": "This OPTIONAL property contains the type of an artifact when the descriptor points to an artifact. This is the value of the config descriptor mediaType when the descriptor references an image manifest",
+        },
     }
-
-    if not ignore_unknown_mediatypes:
-        properties[DESCRIPTOR_MEDIATYPE_KEY]["enum"] = allowed_media_types
 
     if additional_properties:
         properties.update(additional_properties)

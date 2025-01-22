@@ -9,8 +9,9 @@ import {
   TitleSizes,
 } from '@patternfly/react-core';
 import {ExclamationTriangleIcon} from '@patternfly/react-icons';
-import {Feature, VulnerabilitySeverity} from 'src/resources/TagResource';
 import {getSeverityColor} from 'src/libs/utils';
+import {Feature, VulnerabilitySeverity} from 'src/resources/TagResource';
+import './SecurityReportChart.css';
 
 function VulnerabilitySummary(props: VulnerabilityStatsProps) {
   let message = <Skeleton width="400px" />;
@@ -33,15 +34,15 @@ function VulnerabilitySummary(props: VulnerabilityStatsProps) {
 
   return (
     <div>
-      <div className="pf-u-mt-xl pf-u-ml-2xl">
+      <div className="pf-v5-u-mt-xl pf-v5-u-ml-2xl">
         <Title
           headingLevel="h1"
           size={TitleSizes['3xl']}
-          className="pf-u-mb-sm"
+          className="pf-v5-u-mb-sm"
         >
           {message}
         </Title>
-        <Title headingLevel="h3" className="pf-u-mb-lg">
+        <Title headingLevel="h3" className="pf-v5-u-mb-lg">
           {patchesMessage}
         </Title>
         {Object.keys(props.stats).map((vulnLevel) => {
@@ -52,10 +53,10 @@ function VulnerabilitySummary(props: VulnerabilityStatsProps) {
             return;
             {
               props.stats.Pending === 0 ? (
-                <div className="pf-u-mb-sm" key={vulnLevel}>
+                <div className="pf-v5-u-mb-sm" key={vulnLevel}>
                   <ExclamationTriangleIcon
                     color={getSeverityColor(vulnLevel as VulnerabilitySeverity)}
-                    className="pf-u-mr-md"
+                    className="pf-v5-u-mr-md"
                   />
                   <b>{props.stats[vulnLevel]}</b> {vulnLevel}-level
                   vulnerabilities

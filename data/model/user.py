@@ -8,15 +8,19 @@ import bcrypt
 from flask_login import UserMixin
 from peewee import JOIN, IntegrityError, fn
 
+from auth.auth_context import get_authenticated_context
 from data.database import (
+    AutoPruneTaskStatus,
     DeletedNamespace,
     EmailConfirmation,
     FederatedLogin,
     ImageStorageLocation,
     LoginService,
     Namespace,
+    NamespaceAutoPrunePolicy,
     NamespaceGeoRestriction,
     OAuthApplication,
+    OauthAssignedToken,
     QuotaNamespaceSize,
     RepoMirrorConfig,
     Repository,
@@ -43,9 +47,13 @@ from data.database import (
 from data.fields import Credential
 from data.model import (
     DataModelException,
+    DeactivatedRobotOwnerException,
     InvalidEmailAddressException,
+    InvalidNamespaceException,
     InvalidPasswordException,
+    InvalidRobotCredentialException,
     InvalidRobotException,
+    InvalidRobotOwnerException,
     InvalidUsernameException,
     TooManyLoginAttemptsException,
     _basequery,
@@ -60,6 +68,13 @@ from data.text import prefix_search
 from util.backoff import exponential_backoff
 from util.bytes import Bytes
 from util.names import format_robot_username, parse_robot_username
+from util.security.jwtutil import is_jwt
+from util.security.registry_jwt import (
+    InvalidBearerTokenException,
+    build_context_and_subject,
+    decode_bearer_token,
+    generate_bearer_token,
+)
 from util.security.token import decode_public_private_token, encode_public_private_token
 from util.timedeltastring import convert_to_timedelta
 from util.validation import (
@@ -72,8 +87,8 @@ from util.validation import (
 
 logger = logging.getLogger(__name__)
 
-
 EXPONENTIAL_BACKOFF_SCALE = timedelta(seconds=1)
+TMP_ROBOT_TOKEN_VALIDITY_LIFETIME_S = 60 * 60  # 1 hour
 
 
 def hash_password(password, salt=None):
@@ -324,6 +339,10 @@ def update_enabled(user, set_enabled):
 
 def create_robot(robot_shortname, parent, description="", unstructured_metadata=None, token=None):
     (username_valid, username_issue) = validate_username(robot_shortname)
+    if config.app_config.get("ROBOTS_DISALLOW", False):
+        msg = "Robot accounts have been disabled. Please contact your administrator."
+        raise InvalidRobotException(msg)
+
     if not username_valid:
         raise InvalidRobotException(
             "The name for the robot '%s' is invalid: %s" % (robot_shortname, username_issue)
@@ -360,6 +379,41 @@ def create_robot(robot_shortname, parent, description="", unstructured_metadata=
             return created, token
     except Exception as ex:
         raise DataModelException(ex)
+
+
+def get_robot_federation_config(robot):
+    federated_robot = FederatedLogin.select().where(FederatedLogin.user == robot).get()
+    assert federated_robot
+
+    metadata = {}
+    try:
+        metadata = json.loads(federated_robot.metadata_json)
+    except Exception as e:
+        logger.debug("Error parsing metadata: %s", e)
+
+    return metadata.get("federation_config", [])
+
+
+def create_robot_federation_config(robot, fed_config):
+    federated_robot = FederatedLogin.select().where(FederatedLogin.user == robot).get()
+    assert federated_robot
+
+    metadata = {}
+    try:
+        metadata = json.loads(federated_robot.metadata_json)
+    except Exception as e:
+        logger.debug("Error parsing metadata: %s", e)
+
+    try:
+        metadata["federation_config"] = fed_config
+        federated_robot.metadata_json = json.dumps(metadata)
+        federated_robot.save()
+    except Exception as e:
+        raise DataModelException(e)
+
+
+def delete_robot_federation_config(robot):
+    create_robot_federation_config(robot, [])
 
 
 def get_or_create_robot_metadata(robot):
@@ -414,6 +468,24 @@ def lookup_robot_and_metadata(robot_username):
     return robot, get_or_create_robot_metadata(robot)
 
 
+def verify_robot_jwt_token(robot_username, jwt_token, instance_keys):
+    # a robot token can be either an ephemeral JWT token
+    # or an external OIDC token
+    # throws an exception if we cannot decode/verify the token
+
+    decoded_token = decode_bearer_token(jwt_token, instance_keys, config.app_config)
+    assert decoded_token
+
+    sub = decoded_token.get("sub")
+    aud = decoded_token.get("aud")
+
+    if sub != robot_username:
+        raise InvalidRobotCredentialException("Token does not match robot")
+
+    if aud != config.app_config["SERVER_HOSTNAME"]:
+        raise InvalidRobotCredentialException("Invalid audience for robot token")
+
+
 def get_matching_robots(name_prefix, username, limit=10):
     admined_orgs = (
         _basequery.get_user_organizations(username)
@@ -434,7 +506,12 @@ def get_matching_robots(name_prefix, username, limit=10):
     return User.select().where(prefix_checks).limit(limit)
 
 
-def verify_robot(robot_username, password):
+def verify_robot(robot_username, password, instance_keys):
+    if config.app_config.get("ROBOTS_DISALLOW", False):
+        if not robot_username in config.app_config.get("ROBOTS_WHITELIST", []):
+            msg = "Robot account have been disabled. Please contact your administrator."
+            raise InvalidRobotException(msg)
+
     try:
         password.encode("ascii")
     except UnicodeEncodeError:
@@ -448,30 +525,33 @@ def verify_robot(robot_username, password):
     robot = lookup_robot(robot_username)
     assert robot.robot
 
-    # Lookup the token for the robot.
-    try:
-        token_data = RobotAccountToken.get(robot_account=robot)
-        if not token_data.token.matches(password):
-            msg = "Could not find robot with username: %s and supplied password." % robot_username
-            raise InvalidRobotException(msg)
-    except RobotAccountToken.DoesNotExist:
-        msg = "Could not find robot with username: %s and supplied password." % robot_username
-        raise InvalidRobotException(msg)
-
     # Find the owner user and ensure it is not disabled.
     try:
         owner = User.get(User.username == result[0])
     except User.DoesNotExist:
-        raise InvalidRobotException("Robot %s owner does not exist" % robot_username)
+        raise InvalidRobotOwnerException("Robot %s owner does not exist" % robot_username)
 
     if not owner.enabled:
-        raise InvalidRobotException(
-            "This user has been disabled. Please contact your administrator."
+        raise DeactivatedRobotOwnerException(
+            "Robot %s owner %s is disabled" % (robot_username, owner.username)
         )
 
-    # Mark that the robot was accessed.
-    _basequery.update_last_accessed(robot)
+    # Lookup the token for the robot.
+    try:
+        if is_jwt(password):
+            verify_robot_jwt_token(robot_username, password, instance_keys)
+        else:
+            token_data = RobotAccountToken.get(robot_account=robot)
+            if not token_data.token.matches(password):
+                msg = (
+                    "Could not find robot with username: %s and supplied password." % robot_username
+                )
+                raise InvalidRobotCredentialException(msg)
+    except RobotAccountToken.DoesNotExist:
+        msg = "Could not find robot with username: %s and supplied password." % robot_username
+        raise InvalidRobotCredentialException(msg)
 
+    _basequery.update_last_accessed(robot)
     return robot
 
 
@@ -500,6 +580,15 @@ def regenerate_robot_token(robot_shortname, parent):
         robot.save()
 
     return robot, password, metadata
+
+
+def generate_temp_robot_jwt_token(instance_keys):
+    context, subject = build_context_and_subject(get_authenticated_context())
+    audience_param = config.app_config["SERVER_HOSTNAME"]
+    token = generate_bearer_token(
+        audience_param, subject, context, {}, TMP_ROBOT_TOKEN_VALIDITY_LIFETIME_S, instance_keys
+    )
+    return token
 
 
 def delete_robot(robot_username):
@@ -779,6 +868,13 @@ def validate_reset_code(token):
 
 
 def find_user_by_email(email):
+    # Make sure we didn't get any unicode for the email.
+    try:
+        if email and isinstance(email, str):
+            email.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
     try:
         return User.get(User.email == email)
     except User.DoesNotExist:
@@ -786,6 +882,13 @@ def find_user_by_email(email):
 
 
 def get_nonrobot_user(username):
+    # Make sure we didn't get any unicode for the username.
+    try:
+        if username and isinstance(username, str):
+            username.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
     try:
         return User.get(User.username == username, User.organization == False, User.robot == False)
     except User.DoesNotExist:
@@ -793,6 +896,13 @@ def get_nonrobot_user(username):
 
 
 def get_user(username):
+    # Make sure we didn't get any unicode for the username.
+    try:
+        if username and isinstance(username, str):
+            username.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
     try:
         return User.get(User.username == username, User.organization == False)
     except User.DoesNotExist:
@@ -800,6 +910,13 @@ def get_user(username):
 
 
 def get_namespace_user(username):
+    # Make sure we didn't get any unicode for the username.
+    try:
+        if username and isinstance(username, str):
+            username.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
     try:
         return User.get(User.username == username)
     except User.DoesNotExist:
@@ -807,10 +924,21 @@ def get_namespace_user(username):
 
 
 def get_user_or_org(username):
+    # Make sure we didn't get any unicode for the username.
+    try:
+        if username and isinstance(username, str):
+            username.encode("ascii")
+    except UnicodeEncodeError:
+        return None
+
     try:
         return User.get(User.username == username, User.robot == False)
     except User.DoesNotExist:
         return None
+
+
+def get_active_namespaces():
+    return User.select().where(User.robot == False, User.enabled == True)
 
 
 def get_user_by_id(user_db_id):
@@ -834,6 +962,13 @@ def get_namespace_user_by_user_id(namespace_user_db_id):
         return User.get(User.id == namespace_user_db_id, User.robot == False)
     except User.DoesNotExist:
         raise InvalidUsernameException("User with id does not exist: %s" % namespace_user_db_id)
+
+
+def get_active_namespace_user_by_username(namespace):
+    try:
+        return User.get(User.username == namespace, User.robot == False, User.enabled == True)
+    except User.DoesNotExist:
+        raise InvalidNamespaceException("Username does not exist: %s" % namespace)
 
 
 def get_namespace_by_user_id(namespace_user_db_id):
@@ -968,7 +1103,8 @@ def verify_user(username_or_email, password):
 
     # Make sure we didn't get any unicode for the username.
     try:
-        username_or_email.encode("ascii")
+        if username_or_email and isinstance(username_or_email, str):
+            username_or_email.encode("ascii")
     except UnicodeEncodeError:
         return None
 
@@ -1095,8 +1231,11 @@ def get_public_repo_count(username):
     )
 
 
-def get_active_users(disabled=True, deleted=False):
+def get_active_users(disabled=True, deleted=False, include_orgs=False):
     query = User.select().where(User.organization == False, User.robot == False)
+
+    if include_orgs:
+        query = User.select().where(User.robot == False)
 
     if not disabled:
         query = query.where(User.enabled == True)
@@ -1273,6 +1412,13 @@ def delete_user(user, queues):
         if not is_progressing:
             return False
 
+    # Delete any autoprune tasks and policies
+    # We don't want to add this too _delete_user_linked_data since
+    # these entries should only be deleted after the namespace has
+    # been marked for deletion
+    AutoPruneTaskStatus.delete().where(AutoPruneTaskStatus.namespace == user).execute()
+    NamespaceAutoPrunePolicy.delete().where(NamespaceAutoPrunePolicy.namespace == user).execute()
+
     # Delete non-repository related items.
     _delete_user_linked_data(user)
 
@@ -1294,6 +1440,7 @@ def _delete_user_linked_data(user):
         # Delete any OAuth approvals and tokens associated with the user.
         with db_transaction():
             for app in OAuthApplication.select().where(OAuthApplication.organization == user):
+                OauthAssignedToken.delete().where(OauthAssignedToken.application == app).execute()
                 app.delete_instance(recursive=True)
     else:
         # Remove the user from any teams in which they are a member.
@@ -1332,6 +1479,9 @@ def _delete_user_linked_data(user):
 
     # Delete the quota size entry
     QuotaNamespaceSize.delete().where(QuotaNamespaceSize.namespace_user == user).execute()
+
+    # Delete any oauth assigned tokens
+    OauthAssignedToken.delete().where(OauthAssignedToken.assigned_user == user).execute()
 
 
 def get_pull_credentials(robotname):

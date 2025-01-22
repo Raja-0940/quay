@@ -1,29 +1,30 @@
-import {useEffect, useState} from 'react';
 import {
-  Tabs,
-  Tab,
-  TextContent,
-  Text,
-  TextVariants,
-  ClipboardCopy,
-  ClipboardCopyVariant,
-  ExpandableSection,
-  ExpandableSectionToggle,
-  TextArea,
-  Grid,
-  GridItem,
-  TabTitleIcon,
-  TabTitleText,
   Alert,
   Button,
+  ClipboardCopy,
+  ClipboardCopyVariant,
+  Flex,
+  FlexItem,
+  MenuToggle,
+  MenuToggleElement,
+  Select,
+  SelectOption,
+  Tab,
+  TabTitleIcon,
+  TabTitleText,
+  Tabs,
+  Text,
+  TextContent,
+  TextVariants,
 } from '@patternfly/react-core';
-import {useRobotToken} from 'src/hooks/useRobotToken';
-import {addDisplayError} from 'src/resources/ErrorHandling';
-import {IRobot, IRobotToken} from 'src/resources/RobotsResource';
-import {useQuayConfig} from 'src/hooks/UseQuayConfig';
-import {DockerIcon, KeyIcon} from '@patternfly/react-icons';
-import 'src/routes/RepositoriesList/css/RobotAccount.css';
+import {AngleRightIcon, DockerIcon, KeyIcon} from '@patternfly/react-icons';
 import {Buffer} from 'buffer';
+import {useState} from 'react';
+import {useQuayConfig} from 'src/hooks/UseQuayConfig';
+import {useRobotToken} from 'src/hooks/useRobotAccounts';
+import {addDisplayError} from 'src/resources/ErrorHandling';
+import {IRobotToken} from 'src/resources/RobotsResource';
+import 'src/routes/RepositoriesList/css/RobotAccount.css';
 
 const EmptyRobotToken = {
   name: '',
@@ -36,16 +37,30 @@ const EmptyRobotToken = {
 
 export default function RobotTokensModal(props: RobotTokensModalProps) {
   const [activeTabKey, setActiveTabKey] = useState<string | number>(0);
-  const [isSecretExpanded, setSecretExpanded] = useState(false);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [, setLoading] = useState<boolean>(true);
   const [tokenData, setTokenData] = useState<IRobotToken>(EmptyRobotToken);
-  const [err, setErr] = useState<string[]>();
+  const [, setErr] = useState<string[]>();
   const config = useQuayConfig();
   const domain = config?.config.SERVER_HOSTNAME;
+  const [secretScopeSelected, setSecretScopeSelected] = useState<string>(
+    domain + '/' + props.namespace,
+  );
+  const [isSecretScopeSelectOpen, setIsSecretScopeSelectOpen] =
+    useState<boolean>(false);
+  const onToggleClick = () => {
+    setIsSecretScopeSelectOpen(!isSecretScopeSelectOpen);
+  };
+  const onSecretScopeSelect = (
+    _event: React.MouseEvent<Element, MouseEvent> | undefined,
+    value: string | number | undefined,
+  ) => {
+    setSecretScopeSelected(value as string);
+    setIsSecretScopeSelectOpen(false);
+  };
 
-  const {robotAccountToken, regenerateRobotToken} = useRobotToken({
+  const {regenerateRobotToken} = useRobotToken({
     orgName: props.namespace,
-    robName: props.robotAccount.name,
+    robotAcct: props.name,
     onSuccess: (result) => {
       setLoading(false);
       setTokenData(result);
@@ -58,7 +73,8 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
 
   const getDockerConfig = () => {
     const auths = {};
-    auths[domain] = {
+    const scope = secretScopeSelected;
+    auths[scope] = {
       auth: Buffer.from(tokenData.name + ':' + tokenData.token).toString(
         'base64',
       ),
@@ -129,12 +145,12 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
   const onClickRegenerateRobotToken = async () => {
     await regenerateRobotToken({
       namespace: props.namespace,
-      robotName: props.robotAccount.name,
+      robotName: props.name,
     });
   };
 
   const handleTabClick = (
-    event: React.MouseEvent<any> | React.KeyboardEvent | MouseEvent,
+    _event: React.MouseEvent<unknown> | React.KeyboardEvent | MouseEvent,
     tabIndex: string | number,
   ) => {
     setActiveTabKey(tabIndex);
@@ -153,14 +169,35 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
     downloadFile(fileContent, filename);
   };
 
-  const onViewToggle = (isSecretExpanded: boolean) => {
-    setSecretExpanded(isSecretExpanded);
-  };
-
-  const kubesClusterCmd = `kubectl create -f ${props.robotAccount.name.replace(
+  const kubesClusterCmd = `kubectl create -f ${props.name.replace(
     '+',
     '-',
   )}-secret.yml --namespace=NAMESPACEHERE`;
+
+  const secretScopeOptions = [
+    {value: domain + '/' + props.namespace, label: 'Organization'},
+    {value: domain, label: 'Registry'},
+  ];
+
+  const secretScopeToggle = (toggleRef: React.Ref<MenuToggleElement>) => (
+    <MenuToggle
+      id="secret-scope-toggle"
+      ref={toggleRef}
+      onClick={onToggleClick}
+      isExpanded={isSecretScopeSelectOpen}
+      style={
+        {
+          width: '200px',
+        } as React.CSSProperties
+      }
+    >
+      {
+        secretScopeOptions.find(
+          (option) => option.value === secretScopeSelected,
+        )?.label
+      }
+    </MenuToggle>
+  );
 
   return (
     <>
@@ -181,7 +218,7 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
             <TextContent>
               <Text component={TextVariants.h6}>Username & Robot account</Text>
               <ClipboardCopy hoverTip="Copy" clickTip="Copied" isReadOnly>
-                {props.robotAccount.name}
+                {props.name}
               </ClipboardCopy>
               <ClipboardCopy hoverTip="Copy" clickTip="Copied" isReadOnly>
                 {tokenData.token}
@@ -204,14 +241,17 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
           </>
         </Tab>
         <Tab
+          id="kubernetes-tab"
           eventKey={1}
           title={
             <>
               <TabTitleIcon>
                 <img
-                  src={require(activeTabKey == 1
-                    ? 'src/assets/kubernetes.svg'
-                    : 'src/assets/kubernetes-grey.svg')}
+                  src={require(
+                    activeTabKey == 1
+                      ? 'src/assets/kubernetes.svg'
+                      : 'src/assets/kubernetes-grey.svg',
+                  )}
                 />
               </TabTitleIcon>
               <TabTitleText>Kubernetes</TabTitleText>
@@ -220,59 +260,78 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
         >
           <br />
           <TextContent>
-            <Text component={TextVariants.h6}>Step 1: Download secret</Text>
-            <Text component={TextVariants.p}>
-              First, download the Kubernetes pull secret for the robot account:
+            <Text component={TextVariants.h6}>
+              Step 1: Select the scope of the secret
             </Text>
-            <Grid>
-              <GridItem span={6} rowSpan={1}>
-                <a
-                  onClick={() =>
-                    downloadKubernetesFile(getSuffixedFilename('secret.yml'))
-                  }
-                >
-                  {'Download ' + getSuffixedFilename('secret.yml')}
-                </a>
-              </GridItem>
-              <GridItem rowSpan={1} span={6}>
-                <ExpandableSectionToggle
-                  onToggle={onViewToggle}
-                  isExpanded={isSecretExpanded}
-                  contentId="view-kube-file"
-                >
-                  {isSecretExpanded
-                    ? 'Show less'
-                    : 'View ' + getSuffixedFilename('secret.yml')}
-                </ExpandableSectionToggle>
-              </GridItem>
-            </Grid>
-            <ExpandableSection
-              isDetached
-              isExpanded={isSecretExpanded}
-              contentId="view-kube-file"
-            >
-              <TextArea
-                value={getKubernetesContent().join('')}
-                isReadOnly={true}
-                autoResize={true}
-                className="text-area-height"
-                id="expandable-kube-content"
-              />
-            </ExpandableSection>
-            <Text component={TextVariants.h6}>Step 2: Submit</Text>
             <Text component={TextVariants.p}>
-              Second, submit the secret to the cluster using this command:
+              The Kubernetes runtime can be instructed to use this secret only
+              for a specific Quay organization or registry-wide.
+            </Text>
+            <Flex columnGap={{default: 'columnGapMd'}}>
+              <FlexItem>
+                <Select
+                  id="secret-scope-selector"
+                  isOpen={isSecretScopeSelectOpen}
+                  selected={secretScopeSelected}
+                  onSelect={onSecretScopeSelect}
+                  onOpenChange={(isOpen) => setIsSecretScopeSelectOpen(isOpen)}
+                  toggle={secretScopeToggle}
+                  shouldFocusToggleOnSelect
+                >
+                  {secretScopeOptions.map((option, index) => (
+                    <SelectOption key={index} value={option.value}>
+                      {option.label}
+                    </SelectOption>
+                  ))}
+                </Select>
+              </FlexItem>
+              <FlexItem>
+                <AngleRightIcon />
+              </FlexItem>
+              <FlexItem>
+                <Text id="secret-scope" component={TextVariants.p}>
+                  {secretScopeSelected}
+                </Text>
+              </FlexItem>
+            </Flex>
+            <Text component={TextVariants.h6}>Step 2: Download secret</Text>
+            <Text component={TextVariants.p}>
+              Next, download the Kubernetes pull secret for the robot account:
+            </Text>
+            <ClipboardCopy
+              isReadOnly
+              isCode
+              hoverTip="Copy"
+              clickTip="Copied"
+              variant={ClipboardCopyVariant.expansion}
+              id="step-2"
+              className="pf-v5-u-mb-sm"
+            >
+              {getKubernetesContent().join('')}
+            </ClipboardCopy>
+            <Text component={TextVariants.p}>
+              <a
+                onClick={() =>
+                  downloadKubernetesFile(getSuffixedFilename('secret.yml'))
+                }
+              >
+                {'Download ' + getSuffixedFilename('secret.yml')}
+              </a>
+            </Text>
+            <Text component={TextVariants.h6}>Step 3: Submit</Text>
+            <Text component={TextVariants.p}>
+              Then, submit the secret to the cluster using this command:
             </Text>
             <ClipboardCopy
               hoverTip="Copy"
               clickTip="Copied"
               variant="inline-compact"
-              id="step-2"
+              id="step-3"
             >
               {kubesClusterCmd}
             </ClipboardCopy>
             <Text component={TextVariants.h6}>
-              Step 3: Update Kubernetes Configuration
+              Step 4: Update Kubernetes Configuration
             </Text>
             <Text component={TextVariants.p}>
               Finally, add a reference to the secret to your Kuberenetes pod
@@ -296,9 +355,11 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
             <>
               <TabTitleIcon>
                 <img
-                  src={require(activeTabKey == 2
-                    ? 'src/assets/podman.svg'
-                    : 'src/assets/podman-grey.svg')}
+                  src={require(
+                    activeTabKey == 2
+                      ? 'src/assets/podman.svg'
+                      : 'src/assets/podman-grey.svg',
+                  )}
                 />
               </TabTitleIcon>
               <TabTitleText>Podman</TabTitleText>
@@ -333,7 +394,7 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
               <TabTitleIcon>
                 <DockerIcon />
               </TabTitleIcon>
-              <TabTitleText>Docker configuration</TabTitleText>
+              <TabTitleText>Docker</TabTitleText>
             </>
           }
         >
@@ -365,5 +426,5 @@ export default function RobotTokensModal(props: RobotTokensModalProps) {
 
 interface RobotTokensModalProps {
   namespace: string;
-  robotAccount: IRobot;
+  name: string;
 }

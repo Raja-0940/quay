@@ -99,7 +99,7 @@ app.config.update(environ_config)
 
 # Fix remote address handling for Flask.
 if app.config.get("PROXY_COUNT", 1):
-    app.wsgi_app = ProxyFix(app.wsgi_app)
+    app.wsgi_app = ProxyFix(app.wsgi_app)  # type: ignore[method-assign]
 
 # Allow user to define a custom storage preference for the local instance.
 _distributed_storage_preference = os.environ.get("QUAY_DISTRIBUTED_STORAGE_PREFERENCE", "").split()
@@ -124,7 +124,7 @@ features.import_features(app.config)
 # Register additional experimental artifact types.
 # TODO: extract this into a real, dynamic registration system.
 if features.GENERAL_OCI_SUPPORT:
-    for media_type, layer_types in app.config.get("ALLOWED_OCI_ARTIFACT_TYPES").items():
+    for media_type, layer_types in app.config["ALLOWED_OCI_ARTIFACT_TYPES"].items():
         register_artifact_type(media_type, layer_types)
 
 if features.HELM_OCI_SUPPORT:
@@ -251,10 +251,7 @@ analytics = Analytics(app)
 billing = Billing(app)
 sentry = Sentry(app)
 build_logs = BuildLogs(app)
-authentication = UserAuthentication(app, config_provider, OVERRIDE_CONFIG_DIRECTORY)
 userevents = UserEventsBuilderModule(app)
-usermanager = UserManager(app, authentication)
-instance_keys = InstanceKeys(app)
 label_validator = LabelValidator(app)
 build_canceller = BuildCanceller(app)
 
@@ -263,6 +260,9 @@ gitlab_trigger = GitLabOAuthService(app.config, "GITLAB_TRIGGER_CONFIG")
 
 oauth_login = OAuthLoginManager(app.config)
 oauth_apps = [github_trigger, gitlab_trigger]
+
+authentication = UserAuthentication(app, config_provider, OVERRIDE_CONFIG_DIRECTORY, oauth_login)
+usermanager = UserManager(app, authentication)
 
 image_replication_queue = WorkQueue(app.config["REPLICATION_QUEUE_NAME"], tf, has_namespace=False)
 dockerfile_build_queue = WorkQueue(

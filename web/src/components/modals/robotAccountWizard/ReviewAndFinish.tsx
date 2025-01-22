@@ -1,3 +1,4 @@
+import {useState} from 'react';
 import {
   TextContent,
   Text,
@@ -5,14 +6,14 @@ import {
   TextInput,
   FormGroup,
   Form,
-  Dropdown,
-  DropdownToggle,
   ToggleGroup,
   ToggleGroupItem,
   ToggleGroupItemProps,
+  Dropdown,
+  MenuToggle,
+  MenuToggleElement,
 } from '@patternfly/react-core';
-import {TableComposable, Tbody, Td, Tr} from '@patternfly/react-table';
-import React, {useState} from 'react';
+import {Table, Tbody, Td, Tr} from '@patternfly/react-table';
 
 type TableModeType = 'Teams' | 'Repositories' | 'Default-permissions';
 
@@ -30,12 +31,11 @@ const RepoColumnNames = {
 };
 
 export default function ReviewAndFinish(props: ReviewAndFinishProps) {
-  const [tableMode, setTableMode] = useState<TableModeType>('Teams');
+  const [tableMode, setTableMode] = useState<TableModeType>(
+    props.userNamespace ? 'Repositories' : 'Teams',
+  );
 
-  const onTableModeChange: ToggleGroupItemProps['onChange'] = (
-    _isSelected,
-    event,
-  ) => {
+  const onTableModeChange: ToggleGroupItemProps['onChange'] = (event) => {
     const id = event.currentTarget.id;
     setTableMode(id as TableModeType);
   };
@@ -52,7 +52,7 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
 
   const fetchSelectedTeams = () => {
     return (
-      <TableComposable aria-label="Selectable table">
+      <Table aria-label="Selectable table" variant="compact">
         <Tbody>
           {props.selectedTeams.map((team, rowIndex) => (
             <Tr key={team.name}>
@@ -60,7 +60,7 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
                 select={{
                   rowIndex,
                   isSelected: true,
-                  disable: true,
+                  isDisabled: true,
                 }}
               />
               <Td dataLabel={TeamColumnNames.name}>{team.name}</Td>
@@ -76,13 +76,13 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
             </Tr>
           ))}
         </Tbody>
-      </TableComposable>
+      </Table>
     );
   };
 
   const fetchSelectedRepos = () => {
     return (
-      <TableComposable aria-label="Selectable table">
+      <Table aria-label="Selectable table" variant="compact">
         <Tbody>
           {props.selectedRepos.map((repo, rowIndex) => (
             <Tr key={repo.name}>
@@ -90,17 +90,17 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
                 select={{
                   rowIndex,
                   isSelected: true,
-                  disable: true,
+                  isDisabled: true,
                 }}
               />
               <Td dataLabel={RepoColumnNames.name}>{repo.name}</Td>
               <Td dataLabel={RepoColumnNames.permissions}>
                 <Dropdown
-                  toggle={
-                    <DropdownToggle id="toggle-disabled" isDisabled>
+                  toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                    <MenuToggle ref={toggleRef} id="toggle-disabled" isDisabled>
                       {repo.permission}
-                    </DropdownToggle>
-                  }
+                    </MenuToggle>
+                  )}
                 />
               </Td>
               <Td dataLabel={RepoColumnNames.lastUpdated}>
@@ -109,7 +109,7 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
             </Tr>
           ))}
         </Tbody>
-      </TableComposable>
+      </Table>
     );
   };
 
@@ -136,15 +136,53 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
           </FormGroup>
           <FormGroup label="Permission" fieldId="robot-permission" isRequired />
           <Dropdown
-            toggle={
-              <DropdownToggle id="toggle-disabled" isDisabled>
+            toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+              <MenuToggle ref={toggleRef} id="toggle-disabled" isDisabled>
                 {props.robotdefaultPerm}
-              </DropdownToggle>
-            }
+              </MenuToggle>
+            )}
           />
         </Form>
       </>
     );
+  };
+
+  const fetchToggleGroups = () => {
+    if (!props.userNamespace) {
+      return (
+        <>
+          <ToggleGroupItem
+            text="Teams"
+            buttonId="Teams"
+            isSelected={tableMode === 'Teams'}
+            onChange={onTableModeChange}
+          />
+          <ToggleGroupItem
+            text="Repositories"
+            buttonId="Repositories"
+            isSelected={tableMode === 'Repositories'}
+            onChange={onTableModeChange}
+          />
+          <ToggleGroupItem
+            text="Default permissions"
+            buttonId="Default-permissions"
+            isSelected={tableMode === 'Default-permissions'}
+            onChange={onTableModeChange}
+          />
+        </>
+      );
+    } else {
+      return (
+        <>
+          <ToggleGroupItem
+            text="Repositories"
+            buttonId="Repositories"
+            isSelected={tableMode === 'Repositories'}
+            onChange={onTableModeChange}
+          />
+        </>
+      );
+    }
   };
 
   return (
@@ -183,24 +221,7 @@ export default function ReviewAndFinish(props: ReviewAndFinishProps) {
         </FormGroup>
 
         <ToggleGroup aria-label="Default with single selectable">
-          <ToggleGroupItem
-            text="Teams"
-            buttonId="Teams"
-            isSelected={tableMode === 'Teams'}
-            onChange={onTableModeChange}
-          />
-          <ToggleGroupItem
-            text="Repositories"
-            buttonId="Repositories"
-            isSelected={tableMode === 'Repositories'}
-            onChange={onTableModeChange}
-          />
-          <ToggleGroupItem
-            text="Default permissions"
-            buttonId="Default-permissions"
-            isSelected={tableMode === 'Default-permissions'}
-            onChange={onTableModeChange}
-          />
+          {fetchToggleGroups()}
         </ToggleGroup>
       </Form>
       {fetchTableItems()}
@@ -214,4 +235,5 @@ interface ReviewAndFinishProps {
   selectedTeams: any[];
   selectedRepos: any[];
   robotdefaultPerm: string;
+  userNamespace: boolean;
 }

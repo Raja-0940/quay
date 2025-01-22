@@ -1,22 +1,15 @@
+import {ReactElement, useEffect, useState} from 'react';
 import {
-  DropdownItem,
   PageSection,
   PageSectionVariants,
   Spinner,
   Title,
   PanelFooter,
+  DropdownItem,
 } from '@patternfly/react-core';
-import {
-  TableComposable,
-  Thead,
-  Tr,
-  Th,
-  Tbody,
-  Td,
-} from '@patternfly/react-table';
+import {Table, Thead, Tr, Th, Tbody, Td} from '@patternfly/react-table';
 import {useRecoilState} from 'recoil';
 import {IRepository} from 'src/resources/RepositoryResource';
-import {ReactElement, useState} from 'react';
 import {Link, useLocation} from 'react-router-dom';
 import CreateRepositoryModalTemplate from 'src/components/modals/CreateRepoModalTemplate';
 import {getRepoDetailPath} from 'src/routes/NavigationPath';
@@ -81,6 +74,7 @@ export default function RepositoriesList(props: RepositoriesListProps) {
     setPage,
     search,
     setSearch,
+    searchFilter,
     page,
     perPage,
     totalResults,
@@ -100,15 +94,16 @@ export default function RepositoriesList(props: RepositoriesListProps) {
     } as RepoListTableItem;
   });
 
+  useEffect(() => {
+    if (search.currentOrganization !== currentOrg) {
+      setSearch({...search, query: '', currentOrganization: currentOrg});
+    }
+  }, [currentOrg]);
+
   // Filtering Repositories after applied filter
-  const filteredRepos =
-    search.query !== ''
-      ? repositoryList.filter((repo) => {
-          const repoName =
-            currentOrg == null ? `${repo.namespace}/${repo.name}` : repo.name;
-          return repoName.includes(search.query);
-        })
-      : repositoryList;
+  const filteredRepos = searchFilter
+    ? repositoryList.filter(searchFilter)
+    : repositoryList;
 
   const paginatedRepositoryList = filteredRepos?.slice(
     page * perPage - perPage,
@@ -194,14 +189,14 @@ export default function RepositoriesList(props: RepositoriesListProps) {
       component="button"
       onClick={toggleMakePublicClick}
     >
-      Make Public
+      Make public
     </DropdownItem>,
     <DropdownItem
       key="make private"
       component="button"
       onClick={toggleMakePrivateClick}
     >
-      Make Private
+      Make private
     </DropdownItem>,
   ];
 
@@ -328,13 +323,14 @@ export default function RepositoriesList(props: RepositoriesListProps) {
           paginatedRepositoryList={paginatedRepositoryList}
           onSelectRepo={onSelectRepo}
         />
-        <TableComposable aria-label="Selectable table">
+        <Table aria-label="Selectable table" variant="compact">
           <Thead>
             <Tr>
               <Th />
               <Th>{RepositoryListColumnNames.name}</Th>
               <Th>{RepositoryListColumnNames.visibility}</Th>
-              {quayConfig?.features.QUOTA_MANAGEMENT ? (
+              {quayConfig?.features.QUOTA_MANAGEMENT &&
+              quayConfig?.features.EDIT_QUOTA ? (
                 <Th>{RepositoryListColumnNames.size}</Th>
               ) : (
                 <></>
@@ -359,7 +355,7 @@ export default function RepositoriesList(props: RepositoriesListProps) {
                       onSelect: (_event, isSelecting) =>
                         onSelectRepo(repo, rowIndex, isSelecting),
                       isSelected: isRepoSelected(repo),
-                      disable: !isRepoSelectable(repo),
+                      isDisabled: !isRepoSelectable(repo),
                     }}
                   />
                   <Td dataLabel={RepositoryListColumnNames.name}>
@@ -388,7 +384,8 @@ export default function RepositoriesList(props: RepositoriesListProps) {
                   <Td dataLabel={RepositoryListColumnNames.visibility}>
                     {repo.is_public ? 'public' : 'private'}
                   </Td>
-                  {quayConfig?.features.QUOTA_MANAGEMENT ? (
+                  {quayConfig?.features.QUOTA_MANAGEMENT &&
+                  quayConfig?.features.EDIT_QUOTA ? (
                     <Td dataLabel={RepositoryListColumnNames.size}>
                       {' '}
                       {formatSize(repo.size)}
@@ -403,7 +400,7 @@ export default function RepositoriesList(props: RepositoriesListProps) {
               ))
             )}
           </Tbody>
-        </TableComposable>
+        </Table>
         <PanelFooter>
           <ToolbarPagination
             total={totalResults}
@@ -420,7 +417,7 @@ export default function RepositoriesList(props: RepositoriesListProps) {
   );
 }
 
-interface RepoListTableItem {
+export interface RepoListTableItem {
   namespace: string;
   name: string;
   is_public: boolean;

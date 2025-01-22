@@ -12,6 +12,10 @@ import boto3.session
 import botocore.config
 import botocore.exceptions
 from botocore.client import Config
+from botocore.credentials import (
+    DeferredRefreshableCredentials,
+    create_assume_role_refresher,
+)
 from botocore.signers import CloudFrontSigner
 from cachetools.func import lru_cache
 from cryptography.hazmat.backends import default_backend
@@ -25,7 +29,6 @@ from util.registry import filelike
 
 logger = logging.getLogger(__name__)
 
-
 multipart_uploads_started = Counter(
     "quay_multipart_uploads_started_total",
     "number of multipart uploads to Quay storage that started",
@@ -35,11 +38,9 @@ multipart_uploads_completed = Counter(
     "number of multipart uploads to Quay storage that completed",
 )
 
-
 _PartUpload = namedtuple("_PartUpload", ["part_number", "e_tag"])
 _PartUploadMetadata = namedtuple("_PartUploadMetadata", ["path", "offset", "length"])
 _CHUNKS_KEY = "chunks"
-
 
 # This is for HEAD requests to check if a key exists.
 # Since the HEAD request does not have a response body, boto3 uses the status code as error code
@@ -60,6 +61,20 @@ def _build_endpoint_url(hostname, port=None, is_secure=True):
         hostname = hostname + ":" + str(port)
 
     return hostname
+
+
+def is_in_network_request(context, request_ip, s3_region):
+    # Lookup the IP address in our resolution table and determine whether it is under AWS.
+    # If it is, then return an S3 signed URL, since we are in-network.
+    # We only allow requests within the same region as cross region over AWS can incur
+    # additional traffic cost
+    resolved_ip_info: ResolvedLocation = context.ip_resolver.resolve_ip(request_ip)
+    logger.debug("Resolved IP information for IP %s: %s", request_ip, resolved_ip_info)
+    return (
+        resolved_ip_info
+        and resolved_ip_info.provider == "aws"
+        and resolved_ip_info.aws_region == s3_region
+    )
 
 
 class StreamReadKeyAsFile(BufferedIOBase):
@@ -113,6 +128,7 @@ class _CloudStorage(BaseStorageV2):
         bucket_name,
         access_key=None,
         secret_key=None,
+        deferred_refreshable_credentials=None,
     ):
         super(_CloudStorage, self).__init__()
 
@@ -135,7 +151,11 @@ class _CloudStorage(BaseStorageV2):
         self._session = self._connection_class(
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
+            aws_session_token=self._connect_kwargs.get("aws_session_token"),
         )
+
+        if deferred_refreshable_credentials:
+            self._session._session._credentials = deferred_refreshable_credentials
 
     def _initialize_cloud_conn(self):
         if not self._initialized:
@@ -640,10 +660,26 @@ class _CloudStorage(BaseStorageV2):
                     break
 
         if server_side_assembly:
+            # Awesome, we can do this completely server side, now we have to start a new multipart
+            # upload and use copy_part_from_key to set all of the chunks.
             logger.debug("Performing server side assembly of multi-part upload for: %s", final_path)
             try:
-                # Awesome, we can do this completely server side, now we have to start a new multipart
-                # upload and use copy_part_from_key to set all of the chunks.
+                if len(chunk_list) == 1:
+                    # If there is only one chunk, we can simply copy the object to the final path
+                    # this is a managed copy which is faster than the sequential
+                    # copy of 5GB (for S3) chunks in the next block
+
+                    chunk_path = self._init_path(chunk_list[0].path)
+
+                    self._perform_action_with_retry(
+                        self.get_cloud_conn().copy,
+                        CopySource={"Bucket": self.get_cloud_bucket().name, "Key": chunk_path},
+                        Bucket=self.get_cloud_bucket().name,
+                        Key=self._init_path(final_path),
+                    )
+
+                    return
+
                 mpu = self.__initiate_multipart_upload(
                     final_path, content_type=None, content_encoding=None
                 )
@@ -740,10 +776,19 @@ class S3Storage(_CloudStorage):
         port=None,
         # Boto3 options (Full url including scheme anbd optionally port)
         endpoint_url=None,
+        # Chunk size options for multipart upload
         maximum_chunk_size_gb=None,
+        minimum_chunk_size_mb=None,
+        # STS Options
+        aws_session_token=None,
+        deferred_refreshable_credentials=None,
+        signature_version="s3v4",
     ):
         upload_params = {"ServerSideEncryption": "AES256"}
-        connect_kwargs = {"config": Config(signature_version="s3v4")}
+        connect_kwargs = {
+            "config": Config(signature_version=signature_version),
+            "aws_session_token": aws_session_token,
+        }
         if s3_region is not None:
             connect_kwargs["region_name"] = s3_region
             connect_kwargs["endpoint_url"] = "https://s3.{region}.amazonaws.com".format(
@@ -766,11 +811,73 @@ class S3Storage(_CloudStorage):
             s3_bucket,
             access_key=s3_access_key or None,
             secret_key=s3_secret_key or None,
+            deferred_refreshable_credentials=deferred_refreshable_credentials or None,
         )
         chunk_size = (
             maximum_chunk_size_gb if maximum_chunk_size_gb is not None else 5
         )  # 5gb default
         self.maximum_chunk_size = chunk_size * 1024 * 1024 * 1024
+
+        self.minimum_chunk_size = (
+            (minimum_chunk_size_mb if minimum_chunk_size_mb is not None else 5) * 1024 * 1024
+        )
+
+    def setup(self):
+        self.get_cloud_bucket().Cors().put(
+            CORSConfiguration={
+                "CORSRules": [
+                    {
+                        "AllowedOrigins": ["*"],
+                        "AllowedMethods": ["GET"],
+                        "MaxAgeSeconds": 3000,
+                        "AllowedHeaders": ["Authorization"],
+                    },
+                    {
+                        "AllowedOrigins": ["*"],
+                        "AllowedMethods": ["PUT"],
+                        "MaxAgeSeconds": 3000,
+                        "AllowedHeaders": ["Content-Type", "x-amz-acl", "origin"],
+                    },
+                ]
+            }
+        )
+
+
+class IBMCloudStorage(_CloudStorage):
+    def __init__(
+        self,
+        context,
+        hostname,
+        is_secure,
+        storage_path,
+        access_key,
+        secret_key,
+        bucket_name,
+        port=None,
+        maximum_chunk_size_mb=None,
+        signature_version=None,
+    ):
+        upload_params = {}
+        connect_kwargs = {
+            "endpoint_url": _build_endpoint_url(hostname, port=port, is_secure=is_secure),
+            "config": Config(signature_version=signature_version),
+        }
+
+        super(IBMCloudStorage, self).__init__(
+            context,
+            boto3.session.Session,
+            connect_kwargs,
+            upload_params,
+            storage_path,
+            bucket_name,
+            access_key,
+            secret_key,
+        )
+
+        chunk_size = (
+            maximum_chunk_size_mb if maximum_chunk_size_mb is not None else 100
+        )  # 100mb default, recommended by IBM
+        self.maximum_chunk_size = chunk_size * 1024 * 1024
 
     def setup(self):
         self.get_cloud_bucket().Cors().put(
@@ -796,11 +903,27 @@ class S3Storage(_CloudStorage):
 class GoogleCloudStorage(_CloudStorage):
     ENDPOINT_URL = "https://storage.googleapis.com"
 
-    def __init__(self, context, storage_path, access_key, secret_key, bucket_name):
+    def __init__(
+        self,
+        context,
+        storage_path,
+        access_key,
+        secret_key,
+        bucket_name,
+        boto_timeout=60,
+        signature_version=None,
+    ):
         # GCS does not support ListObjectV2
         self._list_object_version = _LIST_OBJECT_VERSIONS["v1"]
         upload_params = {}
-        connect_kwargs = {"endpoint_url": GoogleCloudStorage.ENDPOINT_URL}
+        connect_kwargs = {
+            "endpoint_url": GoogleCloudStorage.ENDPOINT_URL,
+            "config": Config(
+                connect_timeout=boto_timeout,
+                read_timeout=boto_timeout,
+                signature_version=signature_version,
+            ),
+        }
         super(GoogleCloudStorage, self).__init__(
             context,
             boto3.session.Session,
@@ -927,11 +1050,21 @@ class RadosGWStorage(_CloudStorage):
         access_key,
         secret_key,
         bucket_name,
+        region_name=None,
+        signature_version=None,
         port=None,
+        maximum_chunk_size_mb=None,
+        server_side_assembly=True,
     ):
         upload_params = {}
         connect_kwargs = {
             "endpoint_url": _build_endpoint_url(hostname, port=port, is_secure=is_secure),
+            "config": Config(
+                connect_timeout=600 if not server_side_assembly else 60,
+                read_timeout=600 if not server_side_assembly else 60,
+                signature_version=signature_version,
+            ),
+            "region_name": region_name,
         }
 
         super(RadosGWStorage, self).__init__(
@@ -944,6 +1077,13 @@ class RadosGWStorage(_CloudStorage):
             access_key,
             secret_key,
         )
+
+        chunk_size = (
+            maximum_chunk_size_mb if maximum_chunk_size_mb is not None else 32
+        )  # 32mb default, as used in Docker registry:2
+        self.maximum_chunk_size = chunk_size * 1024 * 1024
+
+        self.server_side_assembly = server_side_assembly
 
     # TODO remove when radosgw supports cors: http://tracker.ceph.com/issues/8718#change-38624
     def get_direct_download_url(
@@ -964,13 +1104,21 @@ class RadosGWStorage(_CloudStorage):
         return super(RadosGWStorage, self).get_direct_upload_url(path, mime_type, requires_cors)
 
     def complete_chunked_upload(self, uuid, final_path, storage_metadata):
-        self._initialize_cloud_conn()
-
-        # RadosGW does not support multipart copying from keys, so we are forced to join
-        # it all locally and then reupload.
-        # See https://github.com/ceph/ceph/pull/5139
-        chunk_list = self._chunk_list_from_metadata(storage_metadata)
-        self._client_side_chunk_join(final_path, chunk_list)
+        logger.debug("Server side assembly is set to {}.".format(self.server_side_assembly))
+        if self.server_side_assembly:
+            logger.debug("Initiating multipart upload and server side assembly for final push.")
+            return super(RadosGWStorage, self).complete_chunked_upload(
+                uuid, final_path, storage_metadata
+            )
+        else:
+            logger.debug("Initiating client side chunk join for final assembly and push.")
+            logger.debug("Setting Boto timeout to 600 seconds in case of a large layer push.")
+            self._initialize_cloud_conn()
+            # Certain implementations of RadosGW do not support multipart copying from keys,
+            # so we are forced to join it all locally and then reupload.
+            # See https://github.com/ceph/ceph/pull/5139
+            chunk_list = self._chunk_list_from_metadata(storage_metadata)
+            self._client_side_chunk_join(final_path, chunk_list)
 
 
 class RHOCSStorage(RadosGWStorage):
@@ -1022,20 +1170,9 @@ class CloudFrontedS3Storage(S3Storage):
                 path, request_ip, expires_in, requires_cors, head, **kwargs
             )
 
-        resolved_ip_info = None
         logger.debug('Got direct download request for path "%s" with IP "%s"', path, request_ip)
 
-        # Lookup the IP address in our resolution table and determine whether it is under AWS.
-        # If it is, then return an S3 signed URL, since we are in-network.
-        # We only allow requests within the same region as cross region over AWS can incur
-        # additional traffic cost
-        resolved_ip_info: ResolvedLocation = self._context.ip_resolver.resolve_ip(request_ip)
-        logger.debug("Resolved IP information for IP %s: %s", request_ip, resolved_ip_info)
-        if (
-            resolved_ip_info
-            and resolved_ip_info.provider == "aws"
-            and resolved_ip_info.aws_region == self.s3_region
-        ):
+        if is_in_network_request(self._context, request_ip, self.s3_region):
             return super(CloudFrontedS3Storage, self).get_direct_download_url(
                 path, request_ip, expires_in, requires_cors, head, **kwargs
             )
@@ -1059,7 +1196,6 @@ class CloudFrontedS3Storage(S3Storage):
         logger.debug(
             'Returning CloudFront URL for path "%s" with IP "%s": %s',
             path,
-            resolved_ip_info,
             signed_url,
         )
         return signed_url
@@ -1093,3 +1229,44 @@ class CloudFrontedS3Storage(S3Storage):
             return serialization.load_pem_private_key(
                 key_file.read(), password=None, backend=default_backend()
             )
+
+
+class STSS3Storage(S3Storage):
+    def __init__(
+        self,
+        context,
+        storage_path,
+        s3_bucket,
+        sts_role_arn=None,
+        sts_user_access_key=None,
+        sts_user_secret_key=None,
+        s3_region=None,
+        endpoint_url=None,
+        maximum_chunk_size_gb=None,
+        signature_version="s3v4",
+    ):
+        sts_client = boto3.client(
+            "sts", aws_access_key_id=sts_user_access_key, aws_secret_access_key=sts_user_secret_key
+        )
+        assumed_role = sts_client.assume_role(RoleArn=sts_role_arn, RoleSessionName="quay")
+        credentials = assumed_role["Credentials"]
+        deferred_refreshable_credentials = DeferredRefreshableCredentials(
+            refresh_using=create_assume_role_refresher(
+                sts_client, {"RoleArn": sts_role_arn, "RoleSessionName": "quay"}
+            ),
+            method="sts-assume-role",
+        )
+
+        # !! NOTE !! connect_kwargs here initializes the S3Storage Class not the s3 connection (mis leading re-use of the name)
+        connect_kwargs = {
+            "s3_access_key": credentials["AccessKeyId"],
+            "s3_secret_key": credentials["SecretAccessKey"],
+            "aws_session_token": credentials["SessionToken"],
+            "s3_region": s3_region,
+            "endpoint_url": endpoint_url,
+            "maximum_chunk_size_gb": maximum_chunk_size_gb,
+            "deferred_refreshable_credentials": deferred_refreshable_credentials,
+            "signature_version": signature_version,
+        }
+
+        super().__init__(context, storage_path, s3_bucket, **connect_kwargs)

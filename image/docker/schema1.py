@@ -296,6 +296,14 @@ class DockerSchema1Manifest(ManifestInterface):
         return self.content_type
 
     @property
+    def artifact_type(self):
+        return None
+
+    @property
+    def subject(self):
+        return None
+
+    @property
     def signatures(self):
         return self._signatures
 

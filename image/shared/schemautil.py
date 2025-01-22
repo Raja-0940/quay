@@ -104,5 +104,6 @@ class LazyManifestLoader(object):
             )
 
         return self._supported_types[content_type](
-            Bytes.for_string_or_unicode(manifest_bytes), validate=False
+            Bytes.for_string_or_unicode(manifest_bytes),
+            validate=False,
         )

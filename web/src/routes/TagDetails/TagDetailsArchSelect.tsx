@@ -1,51 +1,71 @@
+import React from 'react';
 import {
-  Select,
-  SelectOption,
-  SelectVariant,
   Flex,
   FlexItem,
+  MenuToggle,
+  MenuToggleElement,
+  SelectList,
 } from '@patternfly/react-core';
-import {useState} from 'react';
+import {Select, SelectOption} from '@patternfly/react-core';
 import {Manifest} from 'src/resources/TagResource';
 
 export default function ArchSelect(props: ArchSelectProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  const onSelect = (
+    _event: React.MouseEvent<Element, MouseEvent> | undefined,
+    value: string | number | undefined,
+  ) => {
+    props.setDigest(value as string);
+    setIsOpen(false);
+  };
+
   if (!props.render) return null;
-  const [isSelectOpen, setIsSelectOpen] = useState<boolean>();
 
   return (
-    <Flex>
+    <Flex style={props.style ? props.style : undefined}>
       <FlexItem>Architecture</FlexItem>
       <FlexItem>
         <Select
-          variant={SelectVariant.single}
-          placeholderText="Architecture"
-          aria-label="Architecture select"
-          onToggle={() => {
-            setIsSelectOpen(!isSelectOpen);
-          }}
-          onSelect={(e, digest) => {
-            props.setDigest(digest as string);
-            setIsSelectOpen(false);
-          }}
-          selections={props.digest}
-          isOpen={isSelectOpen}
           data-testid="arch-select"
+          aria-label="Architecture select"
+          isOpen={isOpen}
+          selected={props.digest || 'Architecture'}
+          onSelect={onSelect}
+          onOpenChange={(isOpen) => setIsOpen(isOpen)}
+          toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+            <MenuToggle
+              ref={toggleRef}
+              onClick={() => setIsOpen(() => !isOpen)}
+              isExpanded={isOpen}
+            >
+              {getPlatformValue(
+                props.options.find((option) => option.digest === props.digest),
+              )}
+            </MenuToggle>
+          )}
+          shouldFocusToggleOnSelect
         >
-          {props.options.map((manifest, index) => (
-            <SelectOption key={index} value={manifest.digest}>
-              {' '}
-              {`${manifest.platform.os} on ${manifest.platform.architecture}`}{' '}
-            </SelectOption>
-          ))}
+          <SelectList>
+            {props.options.map((manifest, index) => (
+              <SelectOption key={index} value={manifest.digest}>
+                {getPlatformValue(manifest)}
+              </SelectOption>
+            ))}
+          </SelectList>
         </Select>
       </FlexItem>
     </Flex>
   );
 }
 
+const getPlatformValue = (manifest: Manifest) =>
+  `${manifest.platform.os} on ${manifest.platform.architecture}`;
+
 type ArchSelectProps = {
   digest: string;
   options: Manifest[];
   setDigest: (digest: string) => void;
   render: boolean;
+  style?: React.CSSProperties;
 };

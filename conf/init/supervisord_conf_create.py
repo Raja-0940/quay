@@ -48,10 +48,12 @@ def registry_services():
         "servicekey": {"autostart": "true"},
         "repomirrorworker": {"autostart": "false"},
         "manifestbackfillworker": {"autostart": "true"},
+        "manifestsubjectbackfillworker": {"autostart": "true"},
         "securityscanningnotificationworker": {"autostart": "true"},
         "config-editor": {"autostart": "false"},
         "quotatotalworker": {"autostart": "true"},
         "quotaregistrysizeworker": {"autostart": "true"},
+        "autopruneworker": {"autostart": "true"},
     }
 
 
@@ -86,10 +88,12 @@ def config_services():
         "servicekey": {"autostart": "false"},
         "repomirrorworker": {"autostart": "false"},
         "manifestbackfillworker": {"autostart": "false"},
+        "manifestsubjectbackfillworker": {"autostart": "false"},
         "securityscanningnotificationworker": {"autostart": "false"},
         "config-editor": {"autostart": "true"},
         "quotatotalworker": {"autostart": "false"},
         "quotaregistrysizeworker": {"autostart": "false"},
+        "autopruneworker": {"autostart": "false"},
     }
 
 

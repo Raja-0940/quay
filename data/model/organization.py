@@ -48,6 +48,13 @@ def get_organization(name):
         raise InvalidOrganizationException("Organization does not exist: %s" % name)
 
 
+def get_organization_by_id(org_db_id):
+    try:
+        return User.get(id=org_db_id, organization=True)
+    except User.DoesNotExist:
+        raise InvalidOrganizationException("Organization does not exist: %s" % org_db_id)
+
+
 def convert_user_to_organization(user_obj, admin_user):
     if user_obj.robot:
         raise DataModelException("Cannot convert a robot into an organization")
@@ -194,3 +201,14 @@ def add_user_as_admin(user_obj, org_obj):
         team.add_user_to_team(user_obj, admin_team)
     except team.UserAlreadyInTeam:
         pass
+
+
+def is_org_admin(user, org):
+    return (
+        Team.select()
+        .join(TeamMember)
+        .switch(Team)
+        .join(TeamRole)
+        .where(Team.organization == org, TeamRole.name == "admin", TeamMember.user == user)
+        .exists()
+    )

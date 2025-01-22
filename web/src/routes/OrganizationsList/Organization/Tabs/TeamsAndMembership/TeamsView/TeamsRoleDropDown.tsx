@@ -1,8 +1,15 @@
-import {Dropdown, DropdownItem, DropdownToggle} from '@patternfly/react-core';
 import {useEffect, useState} from 'react';
+import {
+  Dropdown,
+  DropdownItem,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
+} from '@patternfly/react-core';
 import {AlertVariant} from 'src/atoms/AlertState';
 import {useAlerts} from 'src/hooks/UseAlerts';
-import {useUpdateTeamRole} from 'src/hooks/UseTeams';
+import {useUpdateTeamDetails} from 'src/hooks/UseTeams';
+import {titleCase} from 'src/libs/utils';
 
 export enum teamPermissions {
   Admin = 'admin',
@@ -15,10 +22,10 @@ export function TeamsRoleDropDown(props: TeamsRoleDropDownProps) {
   const {addAlert} = useAlerts();
 
   const {
-    updateTeamRole,
-    errorUpdateTeamRole: error,
-    successUpdateTeamRole: success,
-  } = useUpdateTeamRole(props.organizationName);
+    updateTeamDetails,
+    errorUpdateTeamDetails: error,
+    successUpdateTeamDetails: success,
+  } = useUpdateTeamDetails(props.organizationName);
 
   useEffect(() => {
     if (error) {
@@ -42,27 +49,38 @@ export function TeamsRoleDropDown(props: TeamsRoleDropDownProps) {
     <Dropdown
       data-testid={`${props.teamName}-team-dropdown`}
       onSelect={() => setIsOpen(false)}
-      toggle={
-        <DropdownToggle onToggle={() => setIsOpen(!isOpen)}>
-          {props.teamRole.charAt(0).toUpperCase() + props.teamRole.slice(1)}
-        </DropdownToggle>
-      }
-      isOpen={isOpen}
-      dropdownItems={Object.keys(teamPermissions).map((key) => (
-        <DropdownItem
-          data-testid={`${props.teamName}-${key}`}
-          key={key}
-          onClick={() =>
-            updateTeamRole({
-              teamName: props.teamName,
-              teamRole: teamPermissions[key],
-            })
-          }
+      toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+        <MenuToggle
+          ref={toggleRef}
+          onClick={() => setIsOpen(!isOpen)}
+          isExpanded={isOpen}
+          data-testid={`${props.teamName}-team-dropdown-toggle`}
+          isDisabled={!props.isAdmin || props.isReadOnly}
         >
-          {key}
-        </DropdownItem>
-      ))}
-    />
+          {titleCase(props.teamRole)}
+        </MenuToggle>
+      )}
+      isOpen={isOpen}
+      onOpenChange={(isOpen) => setIsOpen(isOpen)}
+      shouldFocusToggleOnSelect
+    >
+      <DropdownList>
+        {Object.keys(teamPermissions).map((key) => (
+          <DropdownItem
+            data-testid={`${props.teamName}-${key}`}
+            key={key}
+            onClick={() =>
+              updateTeamDetails({
+                teamName: props.teamName,
+                teamRole: teamPermissions[key],
+              })
+            }
+          >
+            {key}
+          </DropdownItem>
+        ))}
+      </DropdownList>
+    </Dropdown>
   );
 }
 
@@ -70,4 +88,6 @@ interface TeamsRoleDropDownProps {
   organizationName: string;
   teamName: string;
   teamRole: string;
+  isReadOnly: boolean;
+  isAdmin: boolean;
 }

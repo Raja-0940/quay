@@ -1,12 +1,15 @@
 import {useState} from 'react';
 import {
   Dropdown,
-  DropdownToggle,
   DropdownItem,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
   ToolbarItem,
 } from '@patternfly/react-core';
 import {SetterOrUpdater} from 'recoil';
 import {SearchState} from './SearchTypes';
+import {FilterIcon} from '@patternfly/react-icons';
 
 export function SearchDropdown(props: SearchDropdownProps) {
   if (props.items.length === 0) {
@@ -26,32 +29,33 @@ export function SearchDropdown(props: SearchDropdownProps) {
     props.setSearchState((prev: SearchState) => ({...prev, field: item}));
   };
 
-  const dropdownItems = props.items.map((item: string) => (
-    <DropdownItem
-      key={item}
-      onClick={() => {
-        onItemSelect(item);
-      }}
-    >
-      {item}
-    </DropdownItem>
-  ));
-
   return (
     <ToolbarItem spacer={{default: 'spacerNone'}}>
       <Dropdown
         onSelect={onSelect}
-        toggle={
-          <DropdownToggle
+        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            icon={<FilterIcon />}
+            ref={toggleRef}
             id="toolbar-dropdown-filter"
-            onToggle={() => setIsOpen(!isOpen)}
+            onClick={() => setIsOpen(!isOpen)}
+            isExpanded={isOpen}
           >
             {props.searchState.field}
-          </DropdownToggle>
-        }
+          </MenuToggle>
+        )}
         isOpen={isOpen}
-        dropdownItems={dropdownItems}
-      />
+        onOpenChange={(isOpen) => setIsOpen(isOpen)}
+        shouldFocusToggleOnSelect
+      >
+        <DropdownList>
+          {props.items.map((item: string) => (
+            <DropdownItem key={item} onClick={() => onItemSelect(item)}>
+              {item}
+            </DropdownItem>
+          ))}
+        </DropdownList>
+      </Dropdown>
     </ToolbarItem>
   );
 }

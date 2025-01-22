@@ -6,14 +6,14 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from io import BytesIO
-from test.fixtures import *
 
 import pytest
 from mock import patch
 from playhouse.test_utils import assert_query_count
 
-from app import docker_v2_signing_key, storage
+from app import docker_v2_signing_key, model_cache, storage
 from data import model
+from data.cache import cache_key
 from data.cache.impl import InMemoryDataModelCache
 from data.cache.test.test_cache import TEST_CACHE_CONFIG
 from data.database import (
@@ -23,12 +23,17 @@ from data.database import (
     ManifestLabel,
     Repository,
     Tag,
+    User,
+    get_epoch_timestamp_ms,
 )
+from data.model import QuotaExceededException, namespacequota
 from data.model.blob import store_blob_record_and_temp_link
 from data.model.oci.retriever import RepositoryContentRetriever
+from data.model.storage import get_layer_path
 from data.registry_model.blobuploader import BlobUploadSettings, upload_blob
 from data.registry_model.datatypes import RepositoryReference
 from data.registry_model.registry_oci_model import OCIModel
+from digest.digest_tools import sha256_digest
 from image.docker.schema1 import (
     DOCKER_SCHEMA1_CONTENT_TYPES,
     DockerSchema1Manifest,
@@ -38,6 +43,7 @@ from image.docker.schema2.list import DockerSchema2ManifestListBuilder
 from image.docker.schema2.manifest import DockerSchema2ManifestBuilder
 from image.oci.index import OCIIndexBuilder
 from image.shared.types import ManifestImageLayer
+from test.fixtures import *
 from util.bytes import Bytes
 
 
@@ -105,6 +111,33 @@ def test_lookup_repository(repo_namespace, repo_name, expected, registry_model):
     repo_ref = registry_model.lookup_repository(repo_namespace, repo_name)
     if expected:
         assert repo_ref
+    else:
+        assert repo_ref is None
+
+
+@pytest.mark.parametrize(
+    "repo_namespace, repo_name, expected",
+    [
+        ("devtable", "simple", True),
+        ("buynlarge", "orgrepo", True),
+        ("buynlarge", "unknownrepo", False),
+    ],
+)
+def test_lookup_repository_with_cache(repo_namespace, repo_name, expected, registry_model):
+    model_cache = InMemoryDataModelCache(TEST_CACHE_CONFIG)
+    model_cache.empty_for_testing()
+
+    cache_key_for_repository_lookup = cache_key.for_repository_lookup(
+        repo_namespace, repo_name, None, None, {}
+    )
+    repo_ref = registry_model.lookup_repository(repo_namespace, repo_name, model_cache=model_cache)
+    cached_result = model_cache.cache.get(cache_key_for_repository_lookup.key)
+
+    if expected:
+        res_obj = OCIModel.get_repository_response_to_object(json.loads(cached_result))
+        assert repo_ref._db_id is res_obj.id
+        assert repo_ref.state == res_obj.state
+        assert repo_ref.namespace_name == repo_namespace
     else:
         assert repo_ref is None
 
@@ -335,11 +368,11 @@ def test_delete_tags(repo_namespace, repo_name, via_manifest, registry_model):
     # Delete every tag in the repository.
     for tag in tags:
         if via_manifest:
-            assert registry_model.delete_tag(repository_ref, tag.name)
+            assert registry_model.delete_tag(model_cache, repository_ref, tag.name)
         else:
             manifest = registry_model.get_manifest_for_tag(tag)
             if manifest is not None:
-                registry_model.delete_tags_for_manifest(manifest)
+                registry_model.delete_tags_for_manifest(model_cache, manifest)
 
         # Make sure the tag is no longer found.
         with assert_query_count(1):
@@ -652,13 +685,70 @@ def test_create_manifest_and_retarget_tag(registry_model):
     assert sample_manifest is not None
 
     another_manifest, tag = registry_model.create_manifest_and_retarget_tag(
-        repository_ref, sample_manifest, "anothertag", storage
+        repository_ref, sample_manifest, "anothertag", storage, verify_quota=True
     )
     assert another_manifest is not None
     assert tag is not None
 
     assert tag.name == "anothertag"
     assert another_manifest.get_parsed_manifest().manifest_dict == sample_manifest.manifest_dict
+
+
+def test_create_manifest_and_retarget_tag_with_quota(registry_model):
+    CONFIG_LAYER_JSON = json.dumps(
+        {
+            "config": {},
+            "rootfs": {"type": "layers", "diff_ids": []},
+            "history": [],
+        }
+    )
+
+    # Create the blobs and manifest object
+    repository_ref = registry_model.lookup_repository("devtable", "simple")
+    builder = DockerSchema2ManifestBuilder()
+    _, config_digest = _populate_blob_with_content(
+        CONFIG_LAYER_JSON, "devtable", repository_ref.name
+    )
+    builder.set_config_digest(config_digest, len(CONFIG_LAYER_JSON.encode("utf-8")))
+    blob_content = "blobcontent"
+    _, blob_digest = _populate_blob_with_content(blob_content, "devtable", repository_ref.name)
+    builder.add_layer(blob_digest, len(blob_content))
+    manifest = builder.build()
+    assert manifest is not None
+
+    # Create quota and limit
+    user = User.select().where(User.username == "devtable").get()
+    new_quota = namespacequota.create_namespace_quota(user, 1)
+    namespacequota.create_namespace_quota_limit(new_quota, "reject", 100)
+
+    rejected = False
+    try:
+        registry_model.create_manifest_and_retarget_tag(
+            repository_ref,
+            manifest,
+            "newtag",
+            storage,
+            verify_quota=True,
+        )
+    except QuotaExceededException:
+        rejected = True
+    assert rejected
+
+    # Assert that a temporary tag outside the time machine window was created since the manifest was rejected
+    # Get the tag that has beeen created in the last second
+    tag = (
+        Tag.select()
+        .where(
+            Tag.lifetime_start_ms > get_epoch_timestamp_ms() - 1000,
+            Tag.repository == repository_ref._db_id,
+        )
+        .get()
+    )
+    assert tag.name.startswith("$temp-")
+    assert tag.lifetime_end_ms is not None
+    assert tag.lifetime_end_ms < get_epoch_timestamp_ms() - user.removed_tag_expiration_s * 1000
+    assert tag.hidden
+    assert not tag.reversion
 
 
 def test_get_schema1_parsed_manifest(registry_model):
@@ -780,6 +870,17 @@ def _populate_blob(digest):
     store_blob_record_and_temp_link("devtable", "simple", digest, location, 1, 120)
 
 
+def _populate_blob_with_content(content, org_name, repository_name):
+    content = Bytes.for_string_or_unicode(content).as_encoded_str()
+    digest = str(sha256_digest(content))
+    location = ImageStorageLocation.get(name="local_us")
+    blob = store_blob_record_and_temp_link(
+        org_name, repository_name, digest, location, len(content), 120
+    )
+    storage.put_content(["local_us"], get_layer_path(blob), content)
+    return blob, digest
+
+
 def test_known_issue_schema1(registry_model):
     test_dir = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(test_dir, "../../../image/docker/test/validate_manifest_known_issue.json")
@@ -867,6 +968,8 @@ def test_lookup_active_repository_tags(test_cached, oci_model):
     latest_tag = oci_model.get_repo_tag(repository_ref, "latest")
     manifest = oci_model.get_manifest_for_tag(latest_tag)
 
+    existing_tags = oci_model.list_all_active_repository_tags(repository_ref)
+
     tag_count = 500
 
     # Create a bunch of tags.
@@ -877,35 +980,51 @@ def test_lookup_active_repository_tags(test_cached, oci_model):
             repository_ref, "somenewtag%s" % index, manifest, storage, docker_v2_signing_key
         )
 
+    for tag in existing_tags:
+        tags_expected.add(tag.name)
+
+    tags_expected = sorted(tags_expected)
     assert tags_expected
 
+    tags_to_process = tags_expected.copy()
+
     # List the tags.
+    tag_limit = 11
     tags_found = set()
-    tag_id = None
+    tag_name = None
     while True:
         if test_cached:
             model_cache = InMemoryDataModelCache(TEST_CACHE_CONFIG)
-            tags = oci_model.lookup_cached_active_repository_tags(
-                model_cache, repository_ref, tag_id, 11
+            tags, has_more = oci_model.lookup_cached_active_repository_tags(
+                model_cache, repository_ref, tag_name, tag_limit
             )
         else:
-            tags = oci_model.lookup_active_repository_tags(repository_ref, tag_id, 11)
+            tags, has_more = oci_model.lookup_active_repository_tags(
+                repository_ref, tag_name, tag_limit
+            )
 
-        assert len(tags) <= 11
-        for tag in tags[0:10]:
+        assert len(tags) <= tag_limit
+        for tag in tags:
+            # ensure last tag name is not part of result set
+            if tag_name is not None:
+                assert tag_name is not tag.name
+
+            # make sure we don't have duplicates between result pages
             assert tag.name not in tags_found
-            if tag.name in tags_expected:
-                tags_found.add(tag.name)
-                tags_expected.remove(tag.name)
 
-        if len(tags) < 11:
+            # make sure the tags are in lexical order
+            assert tag.name == tags_to_process.pop(0)
+
+            tags_found.add(tag.name)
+
+        if not has_more:
             break
 
-        tag_id = tags[10].id
+        tag_name = tags[-1].name
 
     # Make sure we've found all the tags.
-    assert tags_found
-    assert not tags_expected
+    assert set(tags_found) == set(tags_expected)
+    assert not tags_to_process
 
 
 def test_create_manifest_with_temp_tag(initialized_db, registry_model):

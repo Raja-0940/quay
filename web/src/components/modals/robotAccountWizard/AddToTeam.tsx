@@ -1,24 +1,40 @@
+import {useState} from 'react';
 import {
-  DropdownItem,
   Button,
   Text,
   TextVariants,
   TextContent,
+  DropdownItem,
 } from '@patternfly/react-core';
-import {useState} from 'react';
 import {DesktopIcon} from '@patternfly/react-icons';
 import ToggleDrawer from 'src/components/ToggleDrawer';
 import NameAndDescription from 'src/components/modals/robotAccountWizard/NameAndDescription';
 import {addDisplayError} from 'src/resources/ErrorHandling';
 import TeamView from './TeamView';
 import {useCreateTeam} from 'src/hooks/UseTeams';
+import {AlertVariant} from 'src/atoms/AlertState';
+import {useAlerts} from 'src/hooks/UseAlerts';
 
 export default function AddToTeam(props: AddToTeamProps) {
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamDescription, setNewTeamDescription] = useState('');
   const [err, setErr] = useState<string>();
+  const {addAlert} = useAlerts();
 
-  const {createNewTeamHook} = useCreateTeam(props.namespace);
+  const {createNewTeamHook} = useCreateTeam(props.orgName, {
+    onSuccess: () => {
+      addAlert({
+        variant: AlertVariant.Success,
+        title: `Successfully created new team: ${newTeamName}`,
+      });
+    },
+    onError: () => {
+      addAlert({
+        variant: AlertVariant.Failure,
+        title: 'Failed to create new team',
+      });
+    },
+  });
 
   const createNewTeam = () => {
     props.setDrawerExpanded(true);
@@ -42,14 +58,12 @@ export default function AddToTeam(props: AddToTeamProps) {
   const onCreateNewTeam = async () => {
     try {
       await createNewTeamHook({
-        namespace: props.namespace,
-        name: newTeamName,
+        teamName: newTeamName,
         description: newTeamDescription,
-      }).then(function () {
-        setNewTeamName('');
-        setNewTeamDescription('');
-        props.setDrawerExpanded(false);
       });
+      setNewTeamName('');
+      setNewTeamDescription('');
+      props.setDrawerExpanded(false);
     } catch (error) {
       console.error(error);
       setErr(addDisplayError('Unable to create team', error));
@@ -107,6 +121,7 @@ export default function AddToTeam(props: AddToTeamProps) {
         dropdownItems={dropdownItems}
         showToggleGroup={true}
         filterWithDropdown={true}
+        isWizardStep={props.isWizardStep}
       />
     </>
   );
@@ -114,9 +129,10 @@ export default function AddToTeam(props: AddToTeamProps) {
 
 interface AddToTeamProps {
   items: any[];
-  namespace: string;
+  orgName: string;
   isDrawerExpanded: boolean;
   setDrawerExpanded?: (boolean) => void;
   selectedTeams?: any[];
   setSelectedTeams?: (teams) => void;
+  isWizardStep?: boolean;
 }

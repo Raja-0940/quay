@@ -1,5 +1,6 @@
 import random
 import string
+import sys
 from calendar import timegm
 from datetime import datetime, timedelta
 from typing import Any, Dict
@@ -223,6 +224,7 @@ PLANS = [
         "privateRepos": 5,
         "stripeId": "personal-2018",
         "rh_sku": "MW00584MO",
+        "sku_billing": False,
         "audience": "Individuals",
         "bus_features": False,
         "deprecated": False,
@@ -235,6 +237,7 @@ PLANS = [
         "price": 3000,
         "privateRepos": 10,
         "rh_sku": "MW00585MO",
+        "sku_billing": False,
         "stripeId": "bus-micro-2018",
         "audience": "For startups",
         "bus_features": True,
@@ -248,6 +251,7 @@ PLANS = [
         "price": 6000,
         "privateRepos": 20,
         "rh_sku": "MW00586MO",
+        "sku_billing": False,
         "stripeId": "bus-small-2018",
         "audience": "For small businesses",
         "bus_features": True,
@@ -261,6 +265,7 @@ PLANS = [
         "price": 12500,
         "privateRepos": 50,
         "rh_sku": "MW00587MO",
+        "sku_billing": False,
         "stripeId": "bus-medium-2018",
         "audience": "For normal businesses",
         "bus_features": True,
@@ -274,6 +279,7 @@ PLANS = [
         "price": 25000,
         "privateRepos": 125,
         "rh_sku": "MW00588MO",
+        "sku_billing": False,
         "stripeId": "bus-large-2018",
         "audience": "For large businesses",
         "bus_features": True,
@@ -287,6 +293,7 @@ PLANS = [
         "price": 45000,
         "privateRepos": 250,
         "rh_sku": "MW00589MO",
+        "billing_enabled": False,
         "stripeId": "bus-xlarge-2018",
         "audience": "For extra large businesses",
         "bus_features": True,
@@ -300,6 +307,7 @@ PLANS = [
         "price": 85000,
         "privateRepos": 500,
         "rh_sku": "MW00590MO",
+        "billing_enabled": False,
         "stripeId": "bus-500-2018",
         "audience": "For huge business",
         "bus_features": True,
@@ -313,6 +321,7 @@ PLANS = [
         "price": 160000,
         "privateRepos": 1000,
         "rh_sku": "MW00591MO",
+        "sku_billing": False,
         "stripeId": "bus-1000-2018",
         "audience": "For the SaaS savvy enterprise",
         "bus_features": True,
@@ -326,6 +335,7 @@ PLANS = [
         "price": 310000,
         "privateRepos": 2000,
         "rh_sku": "MW00592MO",
+        "sku_billing": False,
         "stripeId": "bus-2000-2018",
         "audience": "For the SaaS savvy big enterprise",
         "bus_features": True,
@@ -346,9 +356,31 @@ PLANS = [
         "superseded_by": None,
         "plans_page_hidden": False,
     },
+    {
+        "title": "premium",
+        "privateRepos": 100,
+        "stripeId": "not_a_stripe_plan",
+        "rh_sku": "MW02701",
+        "sku_billing": True,
+        "plans_page_hidden": True,
+    },
+    {
+        "title": "selfsupport",
+        "privateRepos": sys.maxsize,
+        "stripeId": "not_a_stripe_plan",
+        "rh_sku": "MW02702",
+        "sku_billing": True,
+        "plans_page_hidden": True,
+    },
 ]
 
 RH_SKUS = [plan["rh_sku"] for plan in PLANS if plan.get("rh_sku") is not None]
+
+RECONCILER_SKUS = [
+    plan["rh_sku"]
+    for plan in PLANS
+    if plan.get("rh_sku") is not None and not plan.get("sku_billing")
+]
 
 
 def get_plan(plan_id):
@@ -366,6 +398,8 @@ def get_plan_using_rh_sku(sku):
     """
     Returns the plan with given sku or None if none.
     """
+    if sku is None:
+        return None
     for plan in PLANS:
         if plan.get("rh_sku") == sku:
             return plan
@@ -374,6 +408,13 @@ def get_plan_using_rh_sku(sku):
 
 class FakeStripe(object):
     ACTIVE_CUSTOMERS: Dict[str, Any] = {}
+
+    class error(object):
+        class InvalidRequestException(Exception):
+            pass
+
+        class APIConnectionError(Exception):
+            pass
 
     class FakeSubscription(AttrDict):
         @classmethod

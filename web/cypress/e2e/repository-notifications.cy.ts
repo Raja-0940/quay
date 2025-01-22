@@ -11,8 +11,8 @@ describe('Repository Settings - Notifications', () => {
     // Enable the repository settings feature
     cy.intercept('GET', '/config', (req) =>
       req.reply((res) => {
-        res.body.features['UI_V2_REPO_SETTINGS'] = true;
         res.body.features['MAILING'] = true;
+        res.body.features['IMAGE_EXPIRY_TRIGGER'] = true;
         return res;
       }),
     ).as('getConfig');
@@ -160,14 +160,14 @@ describe('Repository Settings - Notifications', () => {
   });
 
   it('Bulk enables notification', () => {
-    cy.get('#notifications-select-all').click();
+    cy.get('[name="notifications-select-all"]').click();
     cy.contains('Actions').click();
     cy.contains('Enable').click();
     cy.contains('Disabled (3 failed attempts)').should('not.exist');
   });
 
   it('Bulk deletes notification', () => {
-    cy.get('#notifications-select-all').click();
+    cy.get('[name="notifications-select-all"]').click();
     cy.contains('Actions').click();
     cy.get('#bulk-delete-notifications').contains('Delete').click();
     cy.contains('No notifications found');
@@ -177,7 +177,7 @@ describe('Repository Settings - Notifications', () => {
   // TODO: Need notifications in the header
   // to be implemented first
   // it('Creates quay notification',()=>{
-  //     cy.contains('Create Notification').click();
+  //     cy.contains('Create notification').click();
   //     cy.get('#create-notification-form').within(()=>{
   //         cy.contains('Select event').click();
   //         cy.contains('Push to Repository').click();
@@ -198,7 +198,7 @@ describe('Repository Settings - Notifications', () => {
   // });
 
   it('Creates Flowdock notification', () => {
-    cy.contains('Create Notification').click();
+    cy.contains('Create notification').click();
     cy.get('#create-notification-form').within(() => {
       cy.contains('Select event').click();
       cy.contains('Push to Repository').click();
@@ -221,7 +221,7 @@ describe('Repository Settings - Notifications', () => {
   });
 
   it('Creates Hipchat notification', () => {
-    cy.contains('Create Notification').click();
+    cy.contains('Create notification').click();
     cy.get('#create-notification-form').within(() => {
       cy.contains('Select event').click();
       cy.contains('Push to Repository').click();
@@ -245,7 +245,7 @@ describe('Repository Settings - Notifications', () => {
   });
 
   it('Creates Slack notification', () => {
-    cy.contains('Create Notification').click();
+    cy.contains('Create notification').click();
     cy.get('#create-notification-form').within(() => {
       cy.contains('Select event').click();
       cy.contains('Push to Repository').click();
@@ -270,7 +270,7 @@ describe('Repository Settings - Notifications', () => {
   });
 
   it('Creates Webhook notification', () => {
-    cy.contains('Create Notification').click();
+    cy.contains('Create notification').click();
     cy.get('#create-notification-form').within(() => {
       cy.contains('Select event').click();
       cy.contains('Push to Repository').click();
@@ -333,7 +333,7 @@ describe('Repository Settings - Notifications', () => {
       '/api/v1/repository/testorg/testrepo/notification/',
       {},
     ).as('createNotification');
-    cy.contains('Create Notification').click();
+    cy.contains('Create notification').click();
     cy.get('#create-notification-form').within(() => {
       cy.contains('Select event').click();
       cy.contains('Push to Repository').click();
@@ -364,5 +364,55 @@ describe('Repository Settings - Notifications', () => {
         method: 'email',
         title: 'newnotification',
       });
+  });
+
+  it('Creates repo image expiry notification', () => {
+    cy.contains('Create notification').click();
+    cy.get('#create-notification-form').within(() => {
+      cy.contains('Select event').click();
+      cy.contains('Image expiry trigger').click();
+      cy.get('#days-to-image-expiry').type('5');
+      cy.contains('Select method').click();
+      cy.contains('Slack Notification').click();
+      cy.get('#slack-webhook-url-field').type(
+        'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX',
+      );
+      cy.get('#notification-title').type('image expiry notification');
+      cy.contains('Submit').click();
+    });
+    const newnotificationRow = cy.get(
+      'tbody:contains("image expiry notification")',
+    );
+    newnotificationRow.within(() => {
+      cy.get(`[data-label="title"]`).should(
+        'have.text',
+        'image expiry notification',
+      );
+      cy.get(`[data-label="event"]`).should(
+        'have.text',
+        ' Image expiry trigger',
+      );
+      cy.get(`[data-label="notification"]`).should(
+        'contain.text',
+        'Slack Notification',
+      );
+      cy.get(`[data-label="status"]`).should('have.text', 'Enabled');
+    });
+  });
+
+  it('Incorrect form for repo image expiry notification', () => {
+    cy.contains('Create notification').click();
+    cy.get('#create-notification-form').within(() => {
+      cy.contains('Select event').click();
+      cy.contains('Image expiry trigger').click();
+      cy.get('#days-to-image-expiry').type('-5');
+      cy.contains('Select method').click();
+      cy.contains('Slack Notification').click();
+      cy.get('#slack-webhook-url-field').type(
+        'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX',
+      );
+      cy.get('#notification-title').type('image expiry notification');
+      cy.contains('button', 'Submit').should('be.disabled');
+    });
   });
 });

@@ -1,9 +1,11 @@
 import logging
 from datetime import datetime
 
+from flask import request
 from jwt import ExpiredSignatureError, InvalidTokenError
 
 from app import analytics, app, authentication, oauth_login
+from auth.log import log_action
 from auth.scopes import scopes_from_scope_string
 from auth.validateresult import AuthKind, ValidateResult
 from data import model
@@ -12,9 +14,9 @@ from oauth.login_utils import (
     _conduct_oauth_login,
     get_jwt_issuer,
     get_sub_username_email_from_token,
-    is_jwt,
 )
 from oauth.oidc import PublicKeyLoadException
+from util.security.jwtutil import is_jwt
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,7 @@ def validate_sso_oauth_token(token):
             options["verify_signature"] = False
 
         decoded_id_token = service.decode_user_jwt(token, options=options)
-        sub, lusername, lemail = get_sub_username_email_from_token(
+        sub, lusername, lemail, additional_info = get_sub_username_email_from_token(
             decoded_id_token, None, service.config, False
         )
 
@@ -100,18 +102,72 @@ def validate_app_oauth_token(token):
     validated = model.oauth.validate_access_token(token)
     if not validated:
         logger.warning("OAuth access token could not be validated: %s", token)
-        return ValidateResult(
-            AuthKind.oauth, error_message="OAuth access token could not be validated"
-        )
+
+        error_message = "OAuth access token could not be validated"
+
+        if app.config.get("ACTION_LOG_AUDIT_LOGIN_FAILURES"):
+            log_action(
+                "login_failure",
+                None,
+                {
+                    "type": "quayauth",
+                    "kind": "oauth",
+                    "useragent": request.user_agent.string,
+                    "message": error_message,
+                },
+            )
+
+        return ValidateResult(AuthKind.oauth, error_message=error_message)
 
     if validated.expires_at <= datetime.utcnow():
         logger.warning("OAuth access with an expired token: %s", token)
-        return ValidateResult(AuthKind.oauth, error_message="OAuth access token has expired")
+
+        error_message = "OAuth access token has expired"
+
+        if app.config.get("ACTION_LOG_AUDIT_LOGIN_FAILURES"):
+            log_action(
+                "login_failure",
+                validated.application.organization.username,
+                {
+                    "type": "quayauth",
+                    "kind": "oauth",
+                    "token": validated.token_name,
+                    "application_name": validated.application.name,
+                    "oauth_token_id": validated.id,
+                    "oauth_token_application_id": validated.application.client_id,
+                    "oauth_token_application": validated.application.name,
+                    "username": validated.authorized_user.username,
+                    "useragent": request.user_agent.string,
+                    "message": error_message,
+                },
+                performer=validated,
+            )
+
+        return ValidateResult(AuthKind.oauth, error_message=error_message)
 
     # Don't allow disabled users to login.
     if not validated.authorized_user.enabled:
+        error_message = "Granter of the oauth access token is disabled"
+
+        if app.config.get("ACTION_LOG_AUDIT_LOGIN_FAILURES"):
+            log_action(
+                "login_failure",
+                validated.application.organization.username,
+                {
+                    "type": "quayauth",
+                    "kind": "oauth",
+                    "token": validated.token_name,
+                    "application_name": validated.application.name,
+                    "username": validated.authorized_user.username,
+                    "useragent": request.user_agent.string,
+                    "message": error_message,
+                },
+                performer=validated.authorized_user,
+            )
+
         return ValidateResult(
-            AuthKind.oauth, error_message="Granter of the oauth access token is disabled"
+            AuthKind.oauth,
+            error_message=error_message,
         )
 
     # We have a valid token

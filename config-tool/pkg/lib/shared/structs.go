@@ -19,7 +19,7 @@ func (ve ValidationError) String() string {
 
 // DistributedStorageArgs
 type DistributedStorageArgs struct {
-	// Args for RHOCSStorage, RadosGWStorage
+	// Args for RHOCSStorage, RadosGWStorage, IBMCloudStorage
 	Hostname    string `default:"" validate:"" json:"hostname,omitempty" yaml:"hostname,omitempty"`
 	Port        int    `default:"" validate:"" json:"port,omitempty" yaml:"port,omitempty"`
 	IsSecure    bool   `default:"" validate:"" json:"is_secure" yaml:"is_secure"`
@@ -27,6 +27,8 @@ type DistributedStorageArgs struct {
 	AccessKey   string `default:"" validate:"" json:"access_key,omitempty" yaml:"access_key,omitempty"`
 	SecretKey   string `default:"" validate:"" json:"secret_key,omitempty" yaml:"secret_key,omitempty"`
 	BucketName  string `default:"" validate:"" json:"bucket_name,omitempty" yaml:"bucket_name,omitempty"`
+
+	Signature string `default:"s3v2" validate: "" json:"signature_version,omitempty" yaml:"signature_version,omitempty"`
 	// Args for S3Storage
 	S3Bucket    string `default:"" validate:"" json:"s3_bucket,omitempty" yaml:"s3_bucket,omitempty"`
 	S3AccessKey string `default:"" validate:"" json:"s3_access_key,omitempty" yaml:"s3_access_key,omitempty"`
@@ -53,7 +55,11 @@ type DistributedStorageArgs struct {
 	// Args for CloudFlare
 	CloudflareDomain string `default:"" validate:"" json:"cloudflare_domain,omitempty" yaml:"cloudflare_domain,omitempty"`
 	// Args for MultiCDNStorage
-	DefaultProvider string `default:"" validate:"" json:"default_provider,omitempty" yaml:"default_provider,omitempty"`
-	Providers map[string]interface{} `default:"" validate:"" json:"providers,omitempty" yaml:"providers,omitempty"`
-	StorageConfig map[string]interface{} `default:"" validate:"" json:"storage_config,omitempty" yaml:"storage_config,omitempty"`
+	DefaultProvider string                 `default:"" validate:"" json:"default_provider,omitempty" yaml:"default_provider,omitempty"`
+	Providers       map[string]interface{} `default:"" validate:"" json:"providers,omitempty" yaml:"providers,omitempty"`
+	StorageConfig   map[string]interface{} `default:"" validate:"" json:"storage_config,omitempty" yaml:"storage_config,omitempty"`
+	// Args for STSS3Storage
+	STSUserAccessKey string `default:"" validate:"" json:"sts_user_access_key,omitempty" yaml:"sts_user_access_key,omitempty"`
+	STSUserSecretKey string `default:"" validate:"" json:"sts_user_secret_key,omitempty" yaml:"sts_user_secret_key,omitempty"`
+	STSRoleArn       string `default:"" validate:"" json:"sts_role_arn,omitempty" yaml:"sts_role_arn,omitempty"`
 }

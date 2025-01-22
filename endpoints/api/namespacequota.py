@@ -1,21 +1,18 @@
 import logging
 
+import bitmath
 from flask import request
 
 import features
 from auth import scopes
 from auth.auth_context import get_authenticated_user
-from auth.permissions import (
-    AdministerOrganizationPermission,
-    OrganizationMemberPermission,
-    SuperUserPermission,
-    UserReadPermission,
-)
+from auth.permissions import OrganizationMemberPermission, SuperUserPermission
 from data import model
 from data.model import config
 from endpoints.api import (
     ApiResource,
-    log_action,
+    allow_if_global_readonly_superuser,
+    allow_if_superuser,
     nickname,
     request_error,
     require_scope,
@@ -24,7 +21,7 @@ from endpoints.api import (
     show_if,
     validate_json_request,
 )
-from endpoints.exception import InvalidToken, NotFound, Unauthorized
+from endpoints.exception import NotFound, Unauthorized
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +40,12 @@ def quota_view(quota, default_config=False):
     return {
         "id": quota.id,
         "limit_bytes": quota.limit_bytes,
+        "limit": bitmath.Byte(quota.limit_bytes).best_prefix().format("{value:.1f} {unit}"),
         "default_config": default_config,
         "limits": [limit_view(limit) for limit in quota_limits],
-        "default_config_exists": True
-        if config.app_config.get("DEFAULT_SYSTEM_REJECT_QUOTA_BYTES") != 0
-        else False,
+        "default_config_exists": (
+            True if config.app_config.get("DEFAULT_SYSTEM_REJECT_QUOTA_BYTES") != 0 else False
+        ),
     }
 
 
@@ -68,26 +66,44 @@ def get_quota(namespace_name, quota_id):
 
 @resource("/v1/organization/<orgname>/quota")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class OrganizationQuotaList(ApiResource):
     schemas = {
         "NewOrgQuota": {
             "type": "object",
             "description": "Description of a new organization quota",
-            "required": ["limit_bytes"],
-            "properties": {
-                "limit_bytes": {
-                    "type": "integer",
-                    "description": "Number of bytes the organization is allowed",
+            "oneOf": [
+                {
+                    "required": ["limit_bytes"],
+                    "properties": {
+                        "limit_bytes": {
+                            "type": "integer",
+                            "description": "Number of bytes the organization is allowed",
+                        },
+                    },
                 },
-            },
+                {
+                    "required": ["limit"],
+                    "properties": {
+                        "limit": {
+                            "type": "string",
+                            "description": "Human readable storage capacity of the organization",
+                            "pattern": r"^(\d+\s?(B|KiB|MiB|GiB|TiB|PiB|EiB|ZiB|YiB|Ki|Mi|Gi|Ti|Pi|Ei|Zi|Yi|KB|MB|GB|TB|PB|EB|ZB|YB|K|M|G|T|P|E|Z|Y)?)$",
+                        },
+                    },
+                },
+            ],
         },
     }
 
     @nickname("listOrganizationQuota")
     def get(self, orgname):
         orgperm = OrganizationMemberPermission(orgname)
-        if not orgperm.can() and not SuperUserPermission().can():
+        if (
+            not orgperm.can()
+            and not SuperUserPermission().can()
+            and not allow_if_global_readonly_superuser()
+        ):
             raise Unauthorized()
 
         try:
@@ -116,7 +132,16 @@ class OrganizationQuotaList(ApiResource):
             raise Unauthorized()
 
         quota_data = request.get_json()
-        limit_bytes = quota_data["limit_bytes"]
+
+        if "limit" in quota_data:
+            try:
+                limit_bytes = bitmath.parse_string_unsafe(quota_data["limit"]).to_Byte().value
+            except ValueError:
+                raise request_error(
+                    message="Invalid limit format, use a number followed by a unit (e.g. 1GiB)"
+                )
+        else:
+            limit_bytes = quota_data["limit_bytes"]
 
         try:
             org = model.organization.get_organization(orgname)
@@ -137,25 +162,53 @@ class OrganizationQuotaList(ApiResource):
 
 @resource("/v1/organization/<orgname>/quota/<quota_id>")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class OrganizationQuota(ApiResource):
     schemas = {
         "UpdateOrgQuota": {
             "type": "object",
             "description": "Description of a new organization quota",
-            "properties": {
-                "limit_bytes": {
-                    "type": "integer",
-                    "description": "Number of bytes the organization is allowed",
+            "oneOf": [
+                {
+                    "properties": {
+                        "limit_bytes": {
+                            "type": "integer",
+                            "description": "Number of bytes the organization is allowed",
+                        },
+                    },
+                    "required": ["limit_bytes"],
+                    "additionalProperties": False,
                 },
-            },
+                {
+                    "properties": {
+                        "limit": {
+                            "type": "string",
+                            "description": "Human readable storage capacity of the organization",
+                            "pattern": r"^(\d+\s?(B|KiB|MiB|GiB|TiB|PiB|EiB|ZiB|YiB|Ki|Mi|Gi|Ti|Pi|Ei|Zi|Yi|KB|MB|GB|TB|PB|EB|ZB|YB|K|M|G|T|P|E|Z|Y)?)$",
+                        },
+                    },
+                    "required": ["limit"],
+                    "additionalProperties": False,
+                },
+                {
+                    "properties": {
+                        "limit_bytes": {"not": {}},
+                        "limit": {"not": {}},
+                    },
+                    "additionalProperties": False,
+                },
+            ],
         },
     }
 
     @nickname("getOrganizationQuota")
     def get(self, orgname, quota_id):
         orgperm = OrganizationMemberPermission(orgname)
-        if not orgperm.can() and not SuperUserPermission().can():
+        if (
+            not orgperm.can()
+            and not SuperUserPermission().can()
+            and not allow_if_global_readonly_superuser()
+        ):
             raise Unauthorized()
 
         quota = get_quota(orgname, quota_id)
@@ -173,8 +226,19 @@ class OrganizationQuota(ApiResource):
         quota = get_quota(orgname, quota_id)
 
         try:
-            if "limit_bytes" in quota_data:
+            limit_bytes = None
+
+            if "limit" in quota_data:
+                try:
+                    limit_bytes = bitmath.parse_string_unsafe(quota_data["limit"]).to_Byte().value
+                except ValueError:
+                    raise request_error(
+                        message="Invalid limit format, use a number followed by a unit (e.g. 1GiB)"
+                    )
+            elif "limit_bytes" in quota_data:
                 limit_bytes = quota_data["limit_bytes"]
+
+            if limit_bytes:
                 model.namespacequota.update_namespace_quota_size(quota, limit_bytes)
         except model.DataModelException as ex:
             raise request_error(exception=ex)
@@ -197,7 +261,7 @@ class OrganizationQuota(ApiResource):
 
 @resource("/v1/organization/<orgname>/quota/<quota_id>/limit")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class OrganizationQuotaLimitList(ApiResource):
     schemas = {
         "NewOrgQuotaLimit": {
@@ -220,7 +284,11 @@ class OrganizationQuotaLimitList(ApiResource):
     @nickname("listOrganizationQuotaLimit")
     def get(self, orgname, quota_id):
         orgperm = OrganizationMemberPermission(orgname)
-        if not orgperm.can():
+        if (
+            not orgperm.can()
+            and not allow_if_superuser()
+            and not allow_if_global_readonly_superuser()
+        ):
             raise Unauthorized()
 
         quota = get_quota(orgname, quota_id)
@@ -268,7 +336,7 @@ class OrganizationQuotaLimitList(ApiResource):
 
 @resource("/v1/organization/<orgname>/quota/<quota_id>/limit/<limit_id>")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class OrganizationQuotaLimit(ApiResource):
     schemas = {
         "UpdateOrgQuotaLimit": {
@@ -290,7 +358,11 @@ class OrganizationQuotaLimit(ApiResource):
     @nickname("getOrganizationQuotaLimit")
     def get(self, orgname, quota_id, limit_id):
         orgperm = OrganizationMemberPermission(orgname)
-        if not orgperm.can():
+        if (
+            not orgperm.can()
+            and not allow_if_superuser()
+            and not allow_if_global_readonly_superuser()
+        ):
             raise Unauthorized()
 
         quota = get_quota(orgname, quota_id)
@@ -344,7 +416,7 @@ class OrganizationQuotaLimit(ApiResource):
 
 @resource("/v1/user/quota")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class UserQuotaList(ApiResource):
     @require_user_admin()
     @nickname("listUserQuota")
@@ -357,7 +429,7 @@ class UserQuotaList(ApiResource):
 
 @resource("/v1/user/quota/<quota_id>")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class UserQuota(ApiResource):
     @require_user_admin()
     @nickname("getUserQuota")
@@ -370,7 +442,7 @@ class UserQuota(ApiResource):
 
 @resource("/v1/user/quota/<quota_id>/limit")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class UserQuotaLimitList(ApiResource):
     @require_user_admin()
     @nickname("listUserQuotaLimit")
@@ -386,7 +458,7 @@ class UserQuotaLimitList(ApiResource):
 
 @resource("/v1/user/quota/<quota_id>/limit/<limit_id>")
 @show_if(features.SUPER_USERS)
-@show_if(features.QUOTA_MANAGEMENT)
+@show_if(features.QUOTA_MANAGEMENT and features.EDIT_QUOTA)
 class UserQuotaLimit(ApiResource):
     @require_user_admin()
     @nickname("getUserQuotaLimit")

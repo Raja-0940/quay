@@ -1,11 +1,12 @@
+import datetime
 import inspect
 import os
 import shutil
 from collections import namedtuple
-from test.testconfig import FakeTransaction
 
 import pytest
 from flask import Flask, jsonify
+from flask.testing import FlaskClient
 from flask_login import LoginManager
 from flask_mail import Mail
 from flask_principal import Principal, identity_loaded
@@ -32,6 +33,7 @@ from path_converters import (
     RepositoryPathRedirectConverter,
     V1CreateRepositoryPathConverter,
 )
+from test.testconfig import FakeTransaction
 
 INIT_DB_PATH = 0
 
@@ -180,6 +182,11 @@ def appconfig(database_uri):
         "MAIL_DEFAULT_SENDER": "admin@example.com",
         "DATABASE_SECRET_KEY": "anothercrazykey!",
         "FEATURE_PROXY_CACHE": True,
+        "ACTION_LOG_AUDIT_LOGINS": True,
+        "ACTION_LOG_AUDIT_LOGIN_FAILURES": True,
+        "ACTION_LOG_AUDIT_PULL_FAILURES": True,
+        "ACTION_LOG_AUDIT_PUSH_FAILURES": True,
+        "ACTION_LOG_AUDIT_DELETE_FAILURES": True,
     }
     return conf
 
@@ -292,6 +299,29 @@ def initialized_db(appconfig):
             yield
 
 
+class _FlaskLoginClient(FlaskClient):
+    """
+    A Flask test client that knows how to log in users
+    using the Flask-Login extension.
+    https://github.com/maxcountryman/flask-login/pull/470
+    """
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop("user", None)
+        fresh = kwargs.pop("fresh_login", True)
+
+        super(_FlaskLoginClient, self).__init__(*args, **kwargs)
+
+        with self.session_transaction() as sess:
+            if user:
+                sess["_user_id"] = user.uuid
+                sess["user_id"] = user.uuid
+                sess["_fresh"] = fresh
+                sess["login_time"] = datetime.datetime.now()
+            else:
+                sess["_user_id"] = "anonymous"
+
+
 @pytest.fixture()
 def app(appconfig, initialized_db):
     """
@@ -299,6 +329,7 @@ def app(appconfig, initialized_db):
     """
     app = Flask(__name__)
     login_manager = LoginManager(app)
+    login_manager.init_app(app)
 
     @app.errorhandler(model.DataModelException)
     def handle_dme(ex):
@@ -313,6 +344,8 @@ def app(appconfig, initialized_db):
     @identity_loaded.connect_via(app)
     def on_identity_loaded_for_test(sender, identity):
         on_identity_loaded(sender, identity)
+
+    app.test_client_class = _FlaskLoginClient
 
     Principal(app, use_sessions=False)
 

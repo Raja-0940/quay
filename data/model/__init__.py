@@ -41,6 +41,18 @@ class InvalidRobotException(DataModelException):
     pass
 
 
+class DeactivatedRobotOwnerException(InvalidRobotException):
+    pass
+
+
+class InvalidRobotCredentialException(InvalidRobotException):
+    pass
+
+
+class InvalidRobotOwnerException(InvalidRobotException):
+    pass
+
+
 class InvalidUsernameException(DataModelException):
     pass
 
@@ -141,6 +153,50 @@ class OrgSubscriptionBindingAlreadyExists(DataModelException):
     pass
 
 
+class NamespaceAutoPrunePolicyAlreadyExists(DataModelException):
+    pass
+
+
+class NamespaceAutoPrunePolicyDoesNotExist(DataModelException):
+    pass
+
+
+class InvalidNamespaceAutoPrunePolicy(DataModelException):
+    pass
+
+
+class InvalidNamespaceAutoPruneMethod(DataModelException):
+    pass
+
+
+class InvalidNamespaceException(DataModelException):
+    pass
+
+
+class RepositoryAutoPrunePolicyAlreadyExists(DataModelException):
+    pass
+
+
+class RepositoryAutoPrunePolicyDoesNotExist(DataModelException):
+    pass
+
+
+class InvalidRepositoryAutoPrunePolicy(DataModelException):
+    pass
+
+
+class InvalidRepositoryAutoPruneMethod(DataModelException):
+    pass
+
+
+class InvalidRepositoryException(DataModelException):
+    pass
+
+
+class PushesDisabledException(Exception):
+    pass
+
+
 class TooManyLoginAttemptsException(Exception):
     def __init__(self, message, retry_after):
         super(TooManyLoginAttemptsException, self).__init__(message)
@@ -170,6 +226,7 @@ config = Config()
 # moving the minimal number of things to _basequery
 from data.model import (
     appspecifictoken,
+    autoprune,
     blob,
     build,
     entitlements,

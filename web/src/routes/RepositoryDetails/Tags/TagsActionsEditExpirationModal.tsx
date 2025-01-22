@@ -9,12 +9,14 @@ import {
   Label,
   Modal,
   ModalVariant,
+  Split,
+  SplitItem,
   TimePicker,
 } from '@patternfly/react-core';
 import {useEffect, useState} from 'react';
+import {AlertVariant} from 'src/atoms/AlertState';
 import {useAlerts} from 'src/hooks/UseAlerts';
 import {useSetExpiration} from 'src/hooks/UseTags';
-import {AlertVariant} from 'src/atoms/AlertState';
 import {formatDate, isNullOrUndefined} from 'src/libs/utils';
 
 export default function EditExpirationModal(props: EditExpirationModalProps) {
@@ -26,9 +28,19 @@ export default function EditExpirationModal(props: EditExpirationModalProps) {
     errorSetExpiration,
     errorSetExpirationDetails,
   } = useSetExpiration(props.org, props.repo);
+  const [validDate, setValidDate] = useState<boolean>(true);
   const initialDate: Date = isNullOrUndefined(props.expiration)
     ? null
     : new Date(props.expiration);
+
+  const isToday = (date: Date) => {
+    const today = new Date();
+    return (
+      date.getFullYear() == today.getFullYear() &&
+      date.getMonth() == today.getMonth() &&
+      date.getDate() == today.getDate()
+    );
+  };
 
   useEffect(() => {
     setDate(initialDate);
@@ -83,7 +95,7 @@ export default function EditExpirationModal(props: EditExpirationModalProps) {
 
   const dateFormat = (date: Date) => {
     if (!isNullOrUndefined(date)) {
-      return date.toLocaleDateString('en-US', {
+      return date.toLocaleDateString(navigator.language, {
         weekday: 'long',
         year: 'numeric',
         month: 'long',
@@ -92,49 +104,60 @@ export default function EditExpirationModal(props: EditExpirationModalProps) {
     }
   };
 
-  const onDateChange = (value: string, dateValue: Date) => {
-    if (!isNullOrUndefined(dateValue)) {
-      if (isNullOrUndefined(date)) {
-        setDate(dateValue);
+  const onDateChange = (
+    _event: React.FormEvent<HTMLInputElement>,
+    _value: string,
+    dateValue?: Date,
+  ) => {
+    const isInputInvalid = dateValue !== null && dateValue === undefined;
+    if (!isInputInvalid) {
+      const newDate = isNullOrUndefined(date) ? new Date() : new Date(date);
+      newDate.setFullYear(dateValue.getFullYear());
+      newDate.setMonth(dateValue.getMonth());
+      newDate.setDate(dateValue.getDate());
+      if (isNullOrUndefined(date) && isToday(newDate)) {
+        newDate.setHours(newDate.getHours() + 1);
+      } else if (isNullOrUndefined(date)) {
+        newDate.setHours(0, 0, 0, 0);
+      }
+      setDate(newDate);
+      if (newDate <= new Date()) {
+        setValidDate(false);
       } else {
-        setDate((prevDate) => {
-          const newDate = new Date(prevDate);
-          newDate.setFullYear(dateValue.getFullYear());
-          newDate.setMonth(dateValue.getMonth());
-          newDate.setDate(dateValue.getDate());
-          return newDate;
-        });
+        setValidDate(true);
       }
     } else {
-      setDate(null);
+      setValidDate(false);
     }
   };
 
-  const onTimeChange = (time, hour, minute, seconds, isValid) => {
-    if (hour !== null && minute !== null && isValid) {
-      if (isNullOrUndefined(date)) {
-        const newDate = new Date();
-        newDate.setHours(hour);
-        newDate.setMinutes(minute);
+  const onTimeChange = (
+    _event: React.FormEvent<HTMLInputElement>,
+    _time: string,
+    hour?: number,
+    minute?: number,
+    _seconds?: number,
+    isValid?: boolean,
+  ) => {
+    const isInputValid = hour !== null && minute !== null && isValid;
+    if (isInputValid) {
+      const newDate = isNullOrUndefined(date) ? new Date() : new Date(date);
+      newDate.setHours(hour, minute);
+      if (newDate > new Date()) {
+        setValidDate(true);
         setDate(newDate);
       } else {
-        setDate((prevDate) => {
-          const newDate = new Date(prevDate);
-          newDate.setHours(hour);
-          newDate.setMinutes(minute);
-          return newDate;
-        });
+        setValidDate(false);
       }
     } else {
-      setDate(null);
+      setValidDate(false);
     }
   };
 
   const rangeValidator = (date: Date) => {
     const now = new Date();
-    now.setHours(0);
-    now.setMinutes(0);
-    return date < now ? 'Date is before the allowable range.' : '';
+    now.setHours(0, 0, 0, 0);
+    return date < now ? 'Cannot set expiration date to the past.' : '';
   };
 
   const onSave = () => {
@@ -146,6 +169,27 @@ export default function EditExpirationModal(props: EditExpirationModalProps) {
   const onClose = () => {
     props.setIsOpen(false);
     setDate(initialDate);
+  };
+
+  const onClear = () => {
+    setDate(null);
+    setValidDate(true);
+  };
+
+  const is24HourFormat = () => {
+    const dateString = new Date().toLocaleTimeString();
+    const lastTwoCharacters = dateString.slice(-2);
+    return lastTwoCharacters !== 'AM' && lastTwoCharacters !== 'PM';
+  };
+
+  const minExpirationDateTime = () => {
+    if (date !== null && isToday(date)) {
+      return new Date(); // now
+    } else {
+      const newDate = new Date();
+      newDate.setHours(0, 0, 0);
+      return newDate;
+    }
   };
 
   return (
@@ -160,7 +204,12 @@ export default function EditExpirationModal(props: EditExpirationModalProps) {
           <Button key="cancel" variant="primary" onClick={onClose}>
             Cancel
           </Button>,
-          <Button key="modal-action-button" variant="primary" onClick={onSave}>
+          <Button
+            key="modal-action-button"
+            variant="primary"
+            isDisabled={!validDate}
+            onClick={onSave}
+          >
             Change Expiration
           </Button>,
         ]}
@@ -181,26 +230,39 @@ export default function EditExpirationModal(props: EditExpirationModalProps) {
           <DescriptionListGroup>
             <DescriptionListTerm>Expiration date</DescriptionListTerm>
             <DescriptionListDescription>
-              <DatePicker
-                placeholder="No date selected"
-                value={dateFormat(date)}
-                dateFormat={dateFormat}
-                onChange={onDateChange}
-                validators={[rangeValidator]}
-              />
-              <TimePicker
-                id="expiration-time-picker"
-                placeholder="No time selected"
-                time={date === null ? ' ' : date.toLocaleTimeString()}
-                onChange={onTimeChange}
-              />
-              <span style={{paddingRight: '1em'}} />
-              <Button
-                variant={ButtonVariant.secondary}
-                onClick={() => setDate(null)}
-              >
-                Clear
-              </Button>
+              <Split hasGutter style={{height: '4em'}}>
+                <SplitItem>
+                  <DatePicker
+                    placeholder="No date selected"
+                    value={dateFormat(date)}
+                    dateFormat={dateFormat}
+                    dateParse={(date: string) => new Date(date)}
+                    onChange={onDateChange}
+                    validators={[rangeValidator]}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <TimePicker
+                    id="expiration-time-picker"
+                    placeholder="No time selected"
+                    time={
+                      date === null || !validDate
+                        ? ' '
+                        : date.toLocaleTimeString()
+                    }
+                    onChange={onTimeChange}
+                    is24Hour={is24HourFormat()}
+                    minTime={minExpirationDateTime()}
+                    invalidMinMaxErrorMessage="Cannot set expiration date to the past."
+                    style={{width: '150px', whiteSpace: 'normal'}}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <Button variant={ButtonVariant.secondary} onClick={onClear}>
+                    Clear
+                  </Button>
+                </SplitItem>
+              </Split>
             </DescriptionListDescription>
           </DescriptionListGroup>
         </DescriptionList>

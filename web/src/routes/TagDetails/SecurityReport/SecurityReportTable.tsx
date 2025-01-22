@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {Vulnerability, Feature} from 'src/resources/TagResource';
 import React from 'react';
 import {
-  TableComposable,
+  Table,
   Thead,
   Tr,
   Th,
@@ -59,7 +59,7 @@ function getVulnerabilityLink(vulnerability: VulnerabilityListItem) {
 }
 
 function TableTitle() {
-  return <Title headingLevel={'h1'}> Vulnerabilities </Title>;
+  return <Title headingLevel={'h1'}> Advisories </Title>;
 }
 
 export default function SecurityReportTable({features}: SecurityDetailsProps) {
@@ -78,7 +78,7 @@ export default function SecurityReportTable({features}: SecurityDetailsProps) {
 
   // Pagination state
   const [page, setPage] = useState<number>(1);
-  const [perPage, setPerPage] = useState<number>(10);
+  const [perPage, setPerPage] = useState<number>(20);
 
   const paginatedVulns: VulnerabilityListItem[] = filteredVulnList.slice(
     (page - 1) * perPage,
@@ -206,9 +206,10 @@ export default function SecurityReportTable({features}: SecurityDetailsProps) {
           />
         </ToolbarContent>
       </Toolbar>
-      <TableComposable
+      <Table
         data-testid="vulnerability-table"
         aria-label="Expandable table"
+        variant="compact"
       >
         <TableHead />
         {paginatedVulns.length !== 0 ? (
@@ -304,7 +305,7 @@ export default function SecurityReportTable({features}: SecurityDetailsProps) {
             </Tr>
           </Tbody>
         )}
-      </TableComposable>
+      </Table>
       <Toolbar>
         <ToolbarContent>
           <ToolbarPagination

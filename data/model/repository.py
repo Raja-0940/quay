@@ -308,6 +308,7 @@ def get_visible_repositories(
     start_id=None,
     limit=None,
     is_superuser=False,
+    return_all=False,
 ):
     """
     Returns the repositories visible to the given user (if any).
@@ -350,6 +351,7 @@ def get_visible_repositories(
         include_public,
         start_id=start_id,
         is_superuser=is_superuser,
+        return_all=return_all,
     )
 
     if limit is not None:
@@ -491,6 +493,9 @@ def _get_sorted_matching_repositories(
     """
     select_fields = [Repository.id] if ids_only else [Repository, Namespace]
 
+    # Used to make sure that the join to the Namespace table only occurs once
+    is_namespace_table_joined = False
+
     if not lookup_value:
         # This is a generic listing of repositories. Simply return the sorted repositories based
         # on RepositorySearchScore.
@@ -505,15 +510,19 @@ def _get_sorted_matching_repositories(
             search_fields = set([SEARCH_FIELDS.description.name, SEARCH_FIELDS.name.name])
 
         # Always search at least on name (init clause)
-        clause = Repository.name.match(lookup_value)
+        repo_name_value, user_name_value = lookup_value, None
+        if "/" in lookup_value:
+            user_name_value, repo_name_value = lookup_value.split("/", 1)
+
+        clause = Repository.name.match(repo_name_value)
         computed_score = RepositorySearchScore.score.alias("score")
 
         # If the description field is in the search fields, then we need to compute a synthetic score
         # to discount the weight of the description more than the name.
         if SEARCH_FIELDS.description.name in search_fields:
-            clause = Repository.description.match(lookup_value) | clause
+            clause = Repository.description.match(repo_name_value) | clause
             cases = [
-                (Repository.name.match(lookup_value), 100 * RepositorySearchScore.score),
+                (Repository.name.match(repo_name_value), 100 * RepositorySearchScore.score),
             ]
             computed_score = Case(None, cases, RepositorySearchScore.score).alias("score")
 
@@ -526,16 +535,23 @@ def _get_sorted_matching_repositories(
             .order_by(SQL("score").desc(), RepositorySearchScore.id)
         )
 
+        # If an organization/user was found and it was not blank.
+        if user_name_value is not None and user_name_value != "":
+            query = (
+                query.switch(Repository)
+                .join(Namespace)
+                .where(Namespace.username == user_name_value)
+            )
+            is_namespace_table_joined = True
+
     if repo_kind is not None:
         query = query.where(Repository.kind == Repository.kind.get_id(repo_kind))
 
     if not include_private:
         query = query.where(Repository.visibility == _basequery.get_public_repo_visibility())
 
-    if not ids_only:
-        query = query.switch(Repository).join(
-            Namespace, on=(Namespace.id == Repository.namespace_user)
-        )
+    if not ids_only and not is_namespace_table_joined:
+        query = query.switch(Repository).join(Namespace)
 
     return query
 
@@ -648,7 +664,9 @@ def set_repository_state(repo, state):
     repo.save()
 
 
-def mark_repository_for_deletion(namespace_name, repository_name, repository_gc_queue):
+def mark_repository_for_deletion(
+    namespace_name, repository_name, repository_gc_queue, available_after=0, deleted_suffix=None
+):
     """
     Marks a repository for future deletion in the background.
 
@@ -663,7 +681,11 @@ def mark_repository_for_deletion(namespace_name, repository_name, repository_gc_
         Star.delete().where(Star.repository == repo).execute()
 
         # Change the name and state of the repository.
-        repo.name = str(uuid.uuid4())
+        deleted_name = str(uuid.uuid4())
+        if deleted_suffix is not None:
+            deleted_name = "_".join([deleted_name, str(deleted_suffix)])
+        repo.name = deleted_name
+
         repo.state = RepositoryState.MARKED_FOR_DELETION
         repo.save()
 
@@ -679,6 +701,7 @@ def mark_repository_for_deletion(namespace_name, repository_name, repository_gc_
                     "original_name": repository_name,
                 }
             ),
+            available_after=available_after,
         )
         marker.save()
 
@@ -701,6 +724,41 @@ def get_repository_size(repo_id: int):
         return 0
 
 
+def get_repository_sizes(repo_ids: list):
+    """
+    Returns a map from repository ID to the size of the repository in bytes.
+    List of repo_ids should be kept below 1000 to avoid performance issues.
+    """
+    if not repo_ids:
+        return {}
+
+    if len(repo_ids) > 1000:
+        logger.warning(
+            "Fetching more than 1000 repository sizes at once, you may experience performance issues."
+        )
+
+    tuples = (
+        QuotaRepositorySize.select(
+            QuotaRepositorySize.repository,
+            QuotaRepositorySize.size_bytes,
+            can_use_read_replica=True,
+        )
+        .where(QuotaRepositorySize.repository << repo_ids)
+        .tuples()
+    )
+
+    size_map = {}
+    for record in tuples:
+        size_map[record[0]] = record[1] if record[1] is not None else 0
+
+    # Default to 0 for any repositories that don't have a size.
+    for repo_id in repo_ids:
+        if repo_id not in size_map:
+            size_map[repo_id] = 0
+
+    return size_map
+
+
 def get_size_during_upload(repo_id: int):
     query = (
         BlobUpload.select(fn.Sum(BlobUpload.byte_count).alias("size_bytes")).where(
@@ -708,7 +766,4 @@ def get_size_during_upload(repo_id: int):
         )
     ).get()
 
-    repo_size = get_repository_size(repo_id)
-    size_bytes = query.size_bytes if query.size_bytes is not None else 0
-
-    return repo_size + size_bytes
+    return query.size_bytes if query.size_bytes is not None else 0

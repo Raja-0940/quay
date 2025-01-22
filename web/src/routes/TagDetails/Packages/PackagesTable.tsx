@@ -5,14 +5,7 @@ import {
   VulnerabilitySeverity,
   VulnerabilityOrder,
 } from 'src/resources/TagResource';
-import {
-  TableComposable,
-  Thead,
-  Tr,
-  Th,
-  Tbody,
-  Td,
-} from '@patternfly/react-table';
+import {Table, Thead, Tr, Th, Tbody, Td} from '@patternfly/react-table';
 import {
   PageSection,
   PageSectionVariants,
@@ -148,7 +141,7 @@ export default function PackagesTable({features}: PackagesProps) {
 
   // Pagination state
   const [page, setPage] = useState<number>(1);
-  const [perPage, setPerPage] = useState<number>(10);
+  const [perPage, setPerPage] = useState<number>(20);
   const paginatedPackagList: PackagesListItem[] = filteredPackagesList.slice(
     (page - 1) * perPage,
     page * perPage,
@@ -208,7 +201,11 @@ export default function PackagesTable({features}: PackagesProps) {
           />
         </ToolbarContent>
       </Toolbar>
-      <TableComposable aria-label="packages table" data-testid="packages-table">
+      <Table
+        aria-label="packages table"
+        data-testid="packages-table"
+        variant="compact"
+      >
         <TableHead />
         {paginatedPackagList.length !== 0 ? (
           paginatedPackagList.map((pkg: PackagesListItem) => {
@@ -250,14 +247,16 @@ export default function PackagesTable({features}: PackagesProps) {
             </Tr>
           </Tbody>
         )}
-      </TableComposable>
-      <ToolbarPagination
-        itemsList={filteredPackagesList}
-        perPage={perPage}
-        page={page}
-        setPage={setPage}
-        setPerPage={setPerPage}
-      />
+      </Table>
+      <Toolbar>
+        <ToolbarPagination
+          itemsList={filteredPackagesList}
+          perPage={perPage}
+          page={page}
+          setPage={setPage}
+          setPerPage={setPerPage}
+        />
+      </Toolbar>
     </PageSection>
   );
 }

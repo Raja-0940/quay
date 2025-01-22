@@ -1,10 +1,13 @@
+from storage.akamaistorage import AkamaiS3Storage
 from storage.azurestorage import AzureStorage
 from storage.cloud import (
     CloudFrontedS3Storage,
     GoogleCloudStorage,
+    IBMCloudStorage,
     RadosGWStorage,
     RHOCSStorage,
     S3Storage,
+    STSS3Storage,
 )
 from storage.cloudflarestorage import CloudFlareS3Storage
 from storage.distributedstorage import DistributedStorage
@@ -29,6 +32,9 @@ STORAGE_DRIVER_CLASSES = {
     "RHOCSStorage": RHOCSStorage,
     "CloudFlareStorage": CloudFlareS3Storage,
     "MultiCDNStorage": MultiCDNStorage,
+    "IBMCloudStorage": IBMCloudStorage,
+    "STSS3Storage": STSS3Storage,
+    "AkamaiS3Storage": AkamaiS3Storage,
 }
 
 

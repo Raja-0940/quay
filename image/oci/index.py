@@ -47,7 +47,7 @@ from image.docker.schema2 import (
 )
 from image.oci import OCI_IMAGE_INDEX_CONTENT_TYPE, OCI_IMAGE_MANIFEST_CONTENT_TYPE
 from image.oci.descriptor import get_descriptor_schema
-from image.oci.manifest import OCIManifest
+from image.oci.manifest import OCIManifest, OCIManifestDescriptor
 from image.shared import ManifestException
 from image.shared.interfaces import ManifestListInterface
 from image.shared.schemautil import LazyManifestLoader
@@ -70,6 +70,8 @@ INDEX_OS_FEATURES_KEY = "os.features"
 INDEX_FEATURES_KEY = "features"
 INDEX_VARIANT_KEY = "variant"
 INDEX_ANNOTATIONS_KEY = "annotations"
+INDEX_SUBJECT_KEY = "subject"
+INDEX_ARTIFACT_TYPE_KEY = "artifactType"
 
 ALLOWED_MEDIA_TYPES = [
     OCI_IMAGE_MANIFEST_CONTENT_TYPE,
@@ -88,87 +90,94 @@ class MalformedIndex(ManifestException):
 
 
 class OCIIndex(ManifestListInterface):
-    METASCHEMA = {
-        "type": "object",
-        "properties": {
-            INDEX_VERSION_KEY: {
-                "type": "number",
-                "description": "The version of the index. Must always be `2`.",
-                "minimum": 2,
-                "maximum": 2,
-            },
-            INDEX_MEDIATYPE_KEY: {
-                "type": "string",
-                "description": "The media type of the index.",
-                "enum": [OCI_IMAGE_INDEX_CONTENT_TYPE],
-            },
-            INDEX_MANIFESTS_KEY: {
-                "type": "array",
-                "description": "The manifests field contains a list of manifests for specific platforms",
-                "items": get_descriptor_schema(
-                    allowed_media_types=ALLOWED_MEDIA_TYPES,
-                    additional_properties={
-                        INDEX_PLATFORM_KEY: {
-                            "type": "object",
-                            "description": "The platform object describes the platform which the image in "
-                            + "the manifest runs on",
-                            "properties": {
-                                INDEX_ARCHITECTURE_KEY: {
-                                    "type": "string",
-                                    "description": "Specifies the CPU architecture, for example amd64 or ppc64le.",
-                                },
-                                INDEX_OS_KEY: {
-                                    "type": "string",
-                                    "description": "Specifies the operating system, for example linux or windows",
-                                },
-                                INDEX_OS_VERSION_KEY: {
-                                    "type": "string",
-                                    "description": "Specifies the operating system version, for example 10.0.10586",
-                                },
-                                INDEX_OS_FEATURES_KEY: {
-                                    "type": "array",
-                                    "description": "specifies an array of strings, each listing a required OS "
-                                    + "feature (for example on Windows win32k)",
-                                    "items": {
+    def get_meta_schema(self):
+        METASCHEMA = {
+            "type": "object",
+            "properties": {
+                INDEX_VERSION_KEY: {
+                    "type": "number",
+                    "description": "The version of the index. Must always be `2`.",
+                    "minimum": 2,
+                    "maximum": 2,
+                },
+                INDEX_MEDIATYPE_KEY: {
+                    "type": "string",
+                    "description": "The media type of the index.",
+                    "enum": [OCI_IMAGE_INDEX_CONTENT_TYPE],
+                },
+                INDEX_ARTIFACT_TYPE_KEY: {
+                    "type": "string",
+                    "description": "Type of an artifact when the manifest is used for an artifact.",
+                },
+                INDEX_MANIFESTS_KEY: {
+                    "type": "array",
+                    "description": "The manifests field contains a list of manifests for specific platforms",
+                    "items": get_descriptor_schema(
+                        allowed_media_types=ALLOWED_MEDIA_TYPES,
+                        additional_properties={
+                            INDEX_PLATFORM_KEY: {
+                                "type": "object",
+                                "description": "The platform object describes the platform which the image in "
+                                + "the manifest runs on",
+                                "properties": {
+                                    INDEX_ARCHITECTURE_KEY: {
                                         "type": "string",
+                                        "description": "Specifies the CPU architecture, for example amd64 or ppc64le.",
+                                    },
+                                    INDEX_OS_KEY: {
+                                        "type": "string",
+                                        "description": "Specifies the operating system, for example linux or windows",
+                                    },
+                                    INDEX_OS_VERSION_KEY: {
+                                        "type": "string",
+                                        "description": "Specifies the operating system version, for example 10.0.10586",
+                                    },
+                                    INDEX_OS_FEATURES_KEY: {
+                                        "type": "array",
+                                        "description": "specifies an array of strings, each listing a required OS "
+                                        + "feature (for example on Windows win32k)",
+                                        "items": {
+                                            "type": "string",
+                                        },
+                                    },
+                                    INDEX_VARIANT_KEY: {
+                                        "type": "string",
+                                        "description": "Specifies a variant of the CPU, for example armv6l to specify "
+                                        + "a particular CPU variant of the ARM CPU",
+                                    },
+                                    INDEX_FEATURES_KEY: {
+                                        "type": "array",
+                                        "description": "specifies an array of strings, each listing a required CPU "
+                                        + "feature (for example sse4 or aes).",
+                                        "items": {
+                                            "type": "string",
+                                        },
                                     },
                                 },
-                                INDEX_VARIANT_KEY: {
-                                    "type": "string",
-                                    "description": "Specifies a variant of the CPU, for example armv6l to specify "
-                                    + "a particular CPU variant of the ARM CPU",
-                                },
-                                INDEX_FEATURES_KEY: {
-                                    "type": "array",
-                                    "description": "specifies an array of strings, each listing a required CPU "
-                                    + "feature (for example sse4 or aes).",
-                                    "items": {
-                                        "type": "string",
-                                    },
-                                },
+                                "required": [
+                                    INDEX_ARCHITECTURE_KEY,
+                                    INDEX_OS_KEY,
+                                ],
                             },
-                            "required": [
-                                INDEX_ARCHITECTURE_KEY,
-                                INDEX_OS_KEY,
-                            ],
                         },
-                    },
-                    additional_required=[INDEX_PLATFORM_KEY],
-                ),
+                        additional_required=[],
+                    ),
+                },
+                INDEX_SUBJECT_KEY: get_descriptor_schema([]),
+                INDEX_ANNOTATIONS_KEY: {
+                    "type": "object",
+                    "description": "The annotations, if any, on this index",
+                    "additionalProperties": True,
+                },
             },
-            INDEX_ANNOTATIONS_KEY: {
-                "type": "object",
-                "description": "The annotations, if any, on this index",
-                "additionalProperties": True,
-            },
-        },
-        "required": [
-            INDEX_VERSION_KEY,
-            INDEX_MANIFESTS_KEY,
-        ],
-    }
+            "required": [
+                INDEX_VERSION_KEY,
+                INDEX_MANIFESTS_KEY,
+            ],
+        }
+        return METASCHEMA
 
-    def __init__(self, manifest_bytes):
+    def __init__(self, manifest_bytes, validate=False):
         assert isinstance(manifest_bytes, Bytes)
 
         self._layers = None
@@ -180,7 +189,7 @@ class OCIIndex(ManifestListInterface):
             raise MalformedIndex("malformed manifest data: %s" % ve)
 
         try:
-            validate_schema(self._parsed, OCIIndex.METASCHEMA)
+            validate_schema(self._parsed, self.get_meta_schema())
         except ValidationError as ve:
             raise MalformedIndex("manifest data does not match schema: %s" % ve)
 
@@ -208,6 +217,22 @@ class OCIIndex(ManifestListInterface):
         The media type of the schema.
         """
         return OCI_IMAGE_INDEX_CONTENT_TYPE
+
+    @property
+    def artifact_type(self):
+        return self._parsed.get((INDEX_ARTIFACT_TYPE_KEY), None)
+
+    @property
+    def subject(self):
+        subject = self._parsed.get((INDEX_SUBJECT_KEY), None)
+        if subject is None:
+            return None
+
+        return OCIManifestDescriptor(
+            mediatype=subject[INDEX_MEDIATYPE_KEY],
+            size=subject[INDEX_SIZE_KEY],
+            digest=subject[INDEX_DIGEST_KEY],
+        )
 
     @property
     def manifest_dict(self):
@@ -239,6 +264,11 @@ class OCIIndex(ManifestListInterface):
     @property
     def local_blob_digests(self):
         return self.blob_digests
+
+    @property
+    def annotations(self):
+        """Returns the annotations on the manifest list itself."""
+        return self._parsed.get(INDEX_ANNOTATIONS_KEY) or {}
 
     def get_blob_digests_for_translation(self):
         return self.blob_digests
@@ -382,8 +412,9 @@ class OCIIndexBuilder(object):
 
     def __init__(self):
         self.manifests = []
+        self.annotations = {}
 
-    def add_manifest(self, manifest, architecture, os):
+    def add_manifest(self, manifest, architecture=None, os=None):
         """
         Adds a manifest to the list.
         """
@@ -396,41 +427,95 @@ class OCIIndexBuilder(object):
             os,
         )
 
-    def add_manifest_digest(self, manifest_digest, manifest_size, media_type, architecture, os):
+    def add_manifest_for_referrers_index(self, manifest):
         """
         Adds a manifest to the list.
         """
+        assert manifest.media_type in ALLOWED_MEDIA_TYPES
+        self.add_manifest_digest(
+            manifest.digest,
+            len(manifest.bytes.as_encoded_str()),
+            manifest.media_type,
+            None,
+            None,
+            manifest.artifact_type,
+            manifest.annotations,
+        )
+
+    def add_annotation(self, key, value):
+        """
+        Adds an annotation to the index
+        """
+        self.annotations[key] = value
+
+    def add_manifest_digest(
+        self,
+        manifest_digest,
+        manifest_size,
+        media_type,
+        architecture,
+        os,
+        artifact_type=None,
+        annotations=None,
+    ):
+        """
+        Adds a manifest to the list.
+        """
+        platform_dict = {}
+        if architecture:
+            platform_dict[INDEX_ARCHITECTURE_KEY] = architecture
+
+        if os:
+            platform_dict[INDEX_OS_KEY] = os
+
         self.manifests.append(
             (
                 manifest_digest,
                 manifest_size,
                 media_type,
-                {
-                    INDEX_ARCHITECTURE_KEY: architecture,
-                    INDEX_OS_KEY: os,
-                },
+                platform_dict,
+                artifact_type,
+                annotations,
             )
         )
+        if annotations:
+            for k, v in annotations.items():
+                self.annotations[k] = v
+
+    def set_subject(self, digest, size, mediatype):
+        self.subject = OCIManifestDescriptor(digest=digest, size=size, mediatype=mediatype)
 
     def build(self):
         """
         Builds and returns the DockerSchema2ManifestList.
         """
-        assert self.manifests
+        assert self.manifests is not None
 
         manifest_list_dict = {
             INDEX_VERSION_KEY: 2,
             INDEX_MEDIATYPE_KEY: OCI_IMAGE_INDEX_CONTENT_TYPE,
-            INDEX_MANIFESTS_KEY: [
-                {
-                    INDEX_MEDIATYPE_KEY: manifest[2],
-                    INDEX_DIGEST_KEY: manifest[0],
-                    INDEX_SIZE_KEY: manifest[1],
-                    INDEX_PLATFORM_KEY: manifest[3],
-                }
-                for manifest in self.manifests
-            ],
+            INDEX_MANIFESTS_KEY: [],
         }
+
+        for manifest in self.manifests:
+            manifest_dict = {
+                INDEX_MEDIATYPE_KEY: manifest[2],
+                INDEX_DIGEST_KEY: manifest[0],
+                INDEX_SIZE_KEY: manifest[1],
+            }
+            if manifest[3]:
+                manifest_dict[INDEX_PLATFORM_KEY] = manifest[3]
+
+            if manifest[4]:
+                manifest_dict[INDEX_ARTIFACT_TYPE_KEY] = manifest[4]
+
+            if manifest[5]:
+                manifest_dict[INDEX_ANNOTATIONS_KEY] = manifest[5]
+
+            manifest_list_dict[INDEX_MANIFESTS_KEY].append(manifest_dict)
+
+        if self.annotations:
+            manifest_list_dict[INDEX_ANNOTATIONS_KEY] = self.annotations
 
         json_str = Bytes.for_string_or_unicode(json.dumps(manifest_list_dict, indent=3))
         return OCIIndex(json_str)

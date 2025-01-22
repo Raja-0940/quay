@@ -21,6 +21,7 @@ from data.database import (
     Repository,
     RepositoryActionCount,
     RepositoryAuthorizedEmail,
+    RepositoryAutoPrunePolicy,
     RepositoryBuild,
     RepositoryBuildTrigger,
     RepositoryNotification,
@@ -32,8 +33,9 @@ from data.database import (
     db_for_update,
 )
 from data.model import _basequery, blob, config, db_transaction, storage
+from data.model.notification import delete_tag_notifications_for_tag
 from data.model.oci import tag as oci_tag
-from data.model.quota import reset_backfill, subtract_blob_size
+from data.model.quota import QuotaOperation, update_quota
 from data.secscan_model import secscan_model
 from util.metrics.prometheus import gc_repos_purged, gc_table_rows_deleted
 
@@ -105,6 +107,8 @@ def purge_repository(repo, force=False):
         ManifestSecurityStatus.select().where(ManifestSecurityStatus.repository == repo).count()
         == 0
     )
+    # Delete auto-prune policy associated with the repository
+    RepositoryAutoPrunePolicy.delete().where(RepositoryAutoPrunePolicy.repository == repo).execute()
 
     # Delete any repository build triggers, builds, and any other large-ish reference tables for
     # the repository.
@@ -312,6 +316,7 @@ def _purge_oci_tag(tag, context, allow_non_expired=False):
             return False
 
         # Delete the tag.
+        delete_tag_notifications_for_tag(tag)
         tag.delete_instance()
 
     gc_table_rows_deleted.labels(table="Tag").inc()
@@ -344,6 +349,18 @@ def _check_manifest_used(manifest_id):
             ManifestChild.select().where(ManifestChild.child_manifest == manifest_id).get()
             return True
         except ManifestChild.DoesNotExist:
+            pass
+
+        Referrer = Manifest.alias()
+        # Check if the manifest is the subject of another manifest.
+        # Note: Manifest referrers with a valid subject field are created a non expiring
+        # hidden tag, in order to prevent GC from inadvertently removing a referrer.
+        try:
+            Manifest.select().join(Referrer, on=(Manifest.digest == Referrer.subject)).where(
+                Manifest.id == manifest_id
+            ).get()
+            return True
+        except Manifest.DoesNotExist:
             pass
 
     return False
@@ -422,12 +439,8 @@ def _garbage_collect_manifest(manifest_id, context):
             .execute()
         )
 
-        # Subtract blobs from namespace/repo total after they've been deleted successfully.
-        # If the quota feature is disabled mark the total as stale
-        if features.QUOTA_MANAGEMENT:
-            subtract_blob_size(manifest.repository_id, manifest_id, blob_sizes)
-        else:
-            reset_backfill(manifest.repository_id)
+        # Subtract blob sizes if quota management is enabled
+        update_quota(manifest.repository_id, manifest_id, blob_sizes, QuotaOperation.SUBTRACT)
 
         # Delete the security status for the manifest
         deleted_manifest_security = (

@@ -1,5 +1,4 @@
 import {
-  DropdownItem,
   PageSection,
   PageSectionVariants,
   PanelFooter,
@@ -7,9 +6,10 @@ import {
   TextContent,
   Text,
   TextVariants,
+  DropdownItem,
 } from '@patternfly/react-core';
 import {
-  TableComposable,
+  Table,
   ExpandableRowContent,
   Thead,
   Tr,
@@ -46,9 +46,12 @@ import {
   selectedReposPermissionState,
   selectedReposState,
 } from 'src/atoms/RepositoryState';
-import {useRobotRepoPermissions} from 'src/hooks/UseRobotRepoPermissions';
+import {useRobotRepoPermissions} from 'src/hooks/useRobotAccounts';
 import RobotTokensModal from 'src/components/modals/RobotTokensModal';
 import {SearchState} from 'src/components/toolbar/SearchTypes';
+import {AlertVariant} from 'src/atoms/AlertState';
+import {useAlerts} from 'src/hooks/UseAlerts';
+import {RobotFederationModal} from 'src/components/modals/RobotFederationModal';
 
 export const RepoPermissionDropdownItems = [
   {
@@ -98,12 +101,17 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
   const [selectedRepoPerms, setSelectedRepoPerms] = useRecoilState(
     selectedReposPermissionState,
   );
+
   const [prevRepoPerms, setPrevRepoPerms] = useState({});
   const [showRepoModalSave, setShowRepoModalSave] = useState(false);
   const [newRepoPerms, setNewRepoPerms] = useState({});
   const [err, setErr] = useState<string[]>();
   const [errTitle, setErrTitle] = useState<string>();
   const robotPermissionsPlaceholder = useRef(null);
+  const [isRobotFederationModalOpen, setRobotFederationModalOpen] =
+    useState<boolean>(false);
+
+  const {addAlert} = useAlerts();
 
   const {robotAccountsForOrg, page, perPage, setPage, setPerPage} =
     useRobotAccounts({
@@ -149,6 +157,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
       return [];
     },
     {
+      enabled: !props.isUser,
       placeholderData: () => {
         return queryClient.getQueryData([
           'organization',
@@ -200,11 +209,26 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
     return errMessages;
   };
 
+  const showSuccessAlert = (message: string) => {
+    addAlert({
+      variant: AlertVariant.Success,
+      title: message,
+    });
+  };
+
+  const showErrorAlert = (message: string) => {
+    addAlert({
+      variant: AlertVariant.Failure,
+      title: message,
+    });
+  };
+
   const {deleteRobotAccounts} = useDeleteRobotAccounts({
     namespace: props.organizationName,
     onSuccess: () => {
       setSelectedRobotAccounts([]);
       setDeleteModalOpen(!isDeleteModalOpen);
+      showSuccessAlert('Successfully deleted robot account');
     },
     onError: (err) => {
       setErrTitle('Robot Account deletion failed');
@@ -217,6 +241,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
       } else {
         setErr([addDisplayError('Failed to delete robot account', err)]);
       }
+      showErrorAlert('Error deleting robot account');
       setSelectedRobotAccounts([]);
       setDeleteModalOpen(!isDeleteModalOpen);
     },
@@ -224,7 +249,9 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
 
   const {updateRepoPerms, deleteRepoPerms} = useRobotRepoPermissions({
     namespace: props.organizationName,
-    onSuccess: () => null,
+    onSuccess: () => {
+      showSuccessAlert('Successfully updated repository permission');
+    },
     onError: (err) => {
       setErrTitle('Repository Permission update failed');
       if (err instanceof BulkOperationError) {
@@ -238,6 +265,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
           addDisplayError('Failed to update robot repository permission', err),
         ]);
       }
+      showErrorAlert('Failed to update repository permission');
     },
   });
 
@@ -315,6 +343,11 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
     setRobotForModalView(robotAccount);
     setRobotRepos(repos);
     setReposModalOpen(true);
+  };
+
+  const robotFederationModal = (robotAccount) => {
+    setRobotForModalView(robotAccount);
+    setRobotFederationModalOpen(true);
   };
 
   const fetchTeamsModal = (items) => {
@@ -415,9 +448,11 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
     <CreateRobotAccountModal
       isModalOpen={isCreateRobotModalOpen}
       handleModalToggle={() => setCreateRobotModalOpen(!isCreateRobotModalOpen)}
-      namespace={props.organizationName}
+      orgName={props.organizationName}
       teams={teams}
       RepoPermissionDropdownItems={RepoPermissionDropdownItems}
+      showSuccessAlert={showSuccessAlert}
+      showErrorAlert={showErrorAlert}
     />
   );
 
@@ -431,7 +466,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
       return;
     }
     setTableExpanded(!isTableExpanded);
-    paginatedRobotAccountList.map((robotAccount, index) => {
+    paginatedRobotAccountList.map((robotAccount) => {
       setRobotExpanded(robotAccount);
     });
   };
@@ -457,7 +492,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
 
   if (loading && paginatedRobotAccountList?.length == 0) {
     return (
-      <TableComposable aria-label="Empty state table" borders={false}>
+      <Table aria-label="Empty state table" borders={false} variant="compact">
         <Tbody>
           <Tr>
             <Td colSpan={8} textCenter={true}>
@@ -472,7 +507,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
             </Td>
           </Tr>
         </Tbody>
-      </TableComposable>
+      </Table>
     );
   }
   return (
@@ -555,12 +590,18 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
           Component={
             <RobotTokensModal
               namespace={props.organizationName}
-              robotAccount={robotForModalView}
+              name={robotForModalView.name}
             />
           }
           showFooter={true}
         />
-        <TableComposable aria-label="Expandable table" variant={undefined}>
+        <RobotFederationModal
+          robotAccount={robotForModalView}
+          isModalOpen={isRobotFederationModalOpen}
+          setIsModalOpen={setRobotFederationModalOpen}
+          namespace={props.organizationName}
+        />
+        <Table aria-label="Expandable table" variant="compact">
           <Thead>
             <Tr>
               <Th />
@@ -601,7 +642,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
                       onSelect: (_event, isSelecting) =>
                         onSelectRobot(robotAccount, rowIndex, isSelecting),
                       isSelected: isRobotAccountSelected(robotAccount),
-                      disable: !isRobotAccountSelectable(robotAccount),
+                      isDisabled: !isRobotAccountSelectable(robotAccount),
                     }}
                   />
                   <Td dataLabel={RobotAccountColumnNames.robotAccountName}>
@@ -634,6 +675,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
                       setSelectedRobotAccount={setRobotForDeletion}
                       onSetRepoPermsClick={fetchReposModal}
                       robotAccountRepos={robotAccount.repositories}
+                      onSetRobotFederationClick={robotFederationModal}
                     />
                   </Td>
                 </Tr>
@@ -653,7 +695,7 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
               </Tbody>
             );
           })}
-        </TableComposable>
+        </Table>
         <PanelFooter>
           <ToolbarPagination
             itemsList={filteredRobotAccounts}
@@ -672,4 +714,5 @@ export default function RobotAccountsList(props: RobotAccountsListProps) {
 
 interface RobotAccountsListProps {
   organizationName: string;
+  isUser: boolean;
 }

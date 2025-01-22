@@ -6,8 +6,8 @@ export interface IRobot {
   name: string;
   created: string;
   last_accessed: string;
-  teams: string[];
-  repositories: string[];
+  teams?: string[];
+  repositories?: string[];
   description: string;
 }
 
@@ -46,6 +46,11 @@ export interface IRobotToken {
   description: string;
   token: string;
   unstructured_metadata: object;
+}
+
+export interface IRobotFederationConfig {
+  issuer: string;
+  subject: string;
 }
 
 export async function fetchAllRobots(orgnames: string[], signal: AbortSignal) {
@@ -115,6 +120,7 @@ export async function bulkUpdateRepoPermsForRobot(
   orgname: string,
   robotname: string,
   repoPerms: IRepoPerm[],
+  isUser = false,
 ) {
   const responses = await Promise.allSettled(
     repoPerms.map((repoPerm) =>
@@ -123,6 +129,7 @@ export async function bulkUpdateRepoPermsForRobot(
         robotname,
         repoPerm.reponame,
         repoPerm.permission,
+        isUser,
       ),
     ),
   );
@@ -164,10 +171,11 @@ export async function bulkDeleteRepoPermsForRobot(
   orgname: string,
   robotname: string,
   repoNames: string[],
+  isUser: boolean,
 ) {
   const responses = await Promise.allSettled(
     repoNames.map((repoName) =>
-      deleteRepoPermsForRobot(orgname, robotname, repoName),
+      deleteRepoPermsForRobot(orgname, robotname, repoName, isUser),
     ),
   );
 
@@ -196,22 +204,13 @@ export async function createNewRobotForNamespace(
   robotname: string,
   description: string,
   isUser = false,
-  reposToUpdate: IRobotRepoPerms[],
-  selectedTeams: IRobotTeam[],
-  robotDefaultPerm: string,
 ) {
   const namespacePath = isUser ? 'user' : `organization/${orgname}`;
   const createOrgRobotsUrl = `/api/v1/${namespacePath}/robots/${robotname}`;
   const payload = {description: description};
   const response: AxiosResponse = await axios.put(createOrgRobotsUrl, payload);
   assertHttpCode(response.status, 201);
-  return {
-    robotname: robotname,
-    isUser: isUser,
-    reposToUpdate: reposToUpdate,
-    selectedTeams: selectedTeams,
-    robotDefaultPerm: robotDefaultPerm,
-  };
+  return response.data;
 }
 
 export async function deleteRobotAccount(orgname: string, robotname: string) {
@@ -228,6 +227,19 @@ export async function deleteRobotAccount(orgname: string, robotname: string) {
       err,
     );
   }
+}
+
+export async function createRobotAccount(
+  orgName: string,
+  robotAccntName: string,
+  description: string,
+) {
+  const response: AxiosResponse = await axios.put(
+    `api/v1/organization/${orgName}/robots/${robotAccntName}`,
+    {description: description},
+  );
+  assertHttpCode(response.status, 201);
+  return response.data?.name;
 }
 
 export async function bulkDeleteRobotAccounts(
@@ -295,6 +307,37 @@ export async function regenerateRobotToken(
   const userOrOrgPath = isUser ? 'user' : `organization/${orgName}`;
   const updatePermsUrl = `/api/v1/${userOrOrgPath}/robots/${robot}/regenerate`;
   const response: AxiosResponse = await axios.post(updatePermsUrl, {});
+  assertHttpCode(response.status, 200);
+  return response.data;
+}
+
+export async function fetchRobotFederationConfig(
+  orgName: string,
+  robotName: string,
+  signal: AbortSignal,
+) {
+  const robot = robotName.replace(orgName + '+', '');
+  const userOrOrgPath = `organization/${orgName}`;
+  const getRobotFederationConfigUrl = `/api/v1/${userOrOrgPath}/robots/${robot}/federation`;
+  const response: AxiosResponse = await axios.get(getRobotFederationConfigUrl, {
+    signal,
+  });
+  assertHttpCode(response.status, 200);
+  return response.data;
+}
+
+export async function createRobotFederationConfig(
+  orgName: string,
+  robotName: string,
+  federationConfig: IRobotFederationConfig[],
+) {
+  const robot = robotName.replace(orgName + '+', '');
+  const userOrOrgPath = `organization/${orgName}`;
+  const createRobotFederationConfigUrl = `/api/v1/${userOrOrgPath}/robots/${robot}/federation`;
+  const response: AxiosResponse = await axios.post(
+    createRobotFederationConfigUrl,
+    federationConfig,
+  );
   assertHttpCode(response.status, 200);
   return response.data;
 }

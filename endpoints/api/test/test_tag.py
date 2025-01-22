@@ -1,5 +1,3 @@
-from test.fixtures import *
-
 import pytest
 from playhouse.test_utils import assert_query_count
 
@@ -8,6 +6,7 @@ from data.registry_model import registry_model
 from endpoints.api.tag import ListRepositoryTags, RepositoryTag, RestoreTag
 from endpoints.api.test.shared import conduct_api_call
 from endpoints.test.shared import client_with_identity
+from test.fixtures import *
 
 
 @pytest.mark.parametrize(
@@ -17,8 +16,8 @@ from endpoints.test.shared import client_with_identity
         ("aksdjhasd", 400),
     ],
 )
-def test_change_tag_expiration_default(expiration_time, expected_status, client, app):
-    with client_with_identity("devtable", client) as cl:
+def test_change_tag_expiration_default(expiration_time, expected_status, app):
+    with client_with_identity("devtable", app) as cl:
         params = {
             "repository": "devtable/simple",
             "tag": "latest",
@@ -31,8 +30,8 @@ def test_change_tag_expiration_default(expiration_time, expected_status, client,
         conduct_api_call(cl, RepositoryTag, "put", params, request_body, expected_status)
 
 
-def test_change_tag_expiration(client, app):
-    with client_with_identity("devtable", client) as cl:
+def test_change_tag_expiration(app):
+    with client_with_identity("devtable", app) as cl:
         params = {
             "repository": "devtable/simple",
             "tag": "latest",
@@ -68,8 +67,8 @@ def test_change_tag_expiration(client, app):
         (True, "newtag", 201),
     ],
 )
-def test_move_tag(manifest_exists, test_tag, expected_status, client, app):
-    with client_with_identity("devtable", client) as cl:
+def test_move_tag(manifest_exists, test_tag, expected_status, app):
+    with client_with_identity("devtable", app) as cl:
         test_image = "unknown"
         if manifest_exists:
             repo_ref = registry_model.lookup_repository("devtable", "simple")
@@ -90,20 +89,20 @@ def test_move_tag(manifest_exists, test_tag, expected_status, client, app):
 @pytest.mark.parametrize(
     "repo_namespace, repo_name, query_count",
     [
-        ("devtable", "simple", 4),
-        ("devtable", "history", 4),
-        ("devtable", "complex", 4),
-        ("devtable", "gargantuan", 4),
-        ("buynlarge", "orgrepo", 6),  # +2 for permissions checks.
-        ("buynlarge", "anotherorgrepo", 6),  # +2 for permissions checks.
+        ("devtable", "simple", 6),  # +2 for converting object to and from json
+        ("devtable", "history", 6),  # +2 for converting object to and from json
+        ("devtable", "complex", 6),  # +2 for converting object to and from json
+        ("devtable", "gargantuan", 6),  # +2 for converting object to and from json
+        ("buynlarge", "orgrepo", 8),  # +2 for permissions checks.
+        ("buynlarge", "anotherorgrepo", 8),  # +2 for permissions checks.
     ],
 )
-def test_list_repo_tags(repo_namespace, repo_name, client, query_count, app):
+def test_list_repo_tags(repo_namespace, repo_name, query_count, app):
     # Pre-cache media type loads to ensure consistent query count.
     Manifest.media_type.get_name(1)
 
     params = {"repository": repo_namespace + "/" + repo_name}
-    with client_with_identity("devtable", client) as cl:
+    with client_with_identity("devtable", app) as cl:
         with assert_query_count(query_count):
             tags = conduct_api_call(cl, ListRepositoryTags, "get", params).json["tags"]
 
@@ -115,25 +114,25 @@ def test_list_repo_tags(repo_namespace, repo_name, client, query_count, app):
 @pytest.mark.parametrize(
     "repo_namespace, repo_name, query_count",
     [
-        ("devtable", "gargantuan", 4),
+        ("devtable", "gargantuan", 6),  # +2 for converting object to and from json
     ],
 )
-def test_list_repo_tags_filter(repo_namespace, repo_name, client, query_count, app):
+def test_list_repo_tags_filter(repo_namespace, repo_name, query_count, app):
     Manifest.media_type.get_name(1)
 
     params = {"repository": repo_namespace + "/" + repo_name}
-    with client_with_identity("devtable", client) as cl:
+    with client_with_identity("devtable", app) as cl:
         with assert_query_count(query_count):
             params["filter_tag_name"] = "like:v"
             tags = conduct_api_call(cl, ListRepositoryTags, "get", params).json["tags"]
         assert len(tags) == 5
 
-    with client_with_identity("devtable", client) as cl:
-        with assert_query_count(query_count):
+    with client_with_identity("devtable", app) as cl:
+        with assert_query_count(query_count - 1):
             params["filter_tag_name"] = "eq:prod"
             tags = conduct_api_call(cl, ListRepositoryTags, "get", params).json["tags"]
         assert len(tags) == 1
 
-    with client_with_identity("devtable", client) as cl:
+    with client_with_identity("devtable", app) as cl:
         params["filter_tag_name"] = "random"
         resp = conduct_api_call(cl, ListRepositoryTags, "get", params, None, expected_code=400)

@@ -1,12 +1,5 @@
 import {Spinner} from '@patternfly/react-core';
-import {
-  TableComposable,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-} from '@patternfly/react-table';
+import {Table, Tbody, Td, Th, Thead, Tr} from '@patternfly/react-table';
 import {useEffect, useState} from 'react';
 import {useRepositoryPermissions} from 'src/hooks/UseRepositoryPermissions';
 import PermissionsToolbar from './PermissionsToolbar';
@@ -15,7 +8,8 @@ import PermissionsDropdown from './PermissionsDropdown';
 import {RepoMember} from 'src/resources/RepositoryResource';
 import PermissionsKebab from './PermissionsKebab';
 import {DrawerContentType} from '../Types';
-import EntityIcon from 'src/components/EntityIcon';
+import Entity from 'src/components/Entity';
+import {EntityKind} from 'src/resources/UserResource';
 
 export default function Permissions(props: PermissionsProps) {
   const {
@@ -77,7 +71,7 @@ export default function Permissions(props: PermissionsProps) {
         deselectAll={() => setSelectedMembers([])}
         setDrawerContent={props.setDrawerContent}
       />
-      <TableComposable aria-label="Repository permissions table">
+      <Table aria-label="Repository permissions table" variant="compact">
         <Thead>
           <Tr>
             <Th />
@@ -102,7 +96,7 @@ export default function Permissions(props: PermissionsProps) {
               />
               <Td data-label="membername">{member.name}</Td>
               <Td data-label="type">
-                <EntityIcon type={member.type} includeText />
+                <Entity type={EntityKind[member.type]} includeText />
               </Td>
               <Td data-label="role">
                 <PermissionsDropdown member={member} />
@@ -113,7 +107,7 @@ export default function Permissions(props: PermissionsProps) {
             </Tr>
           ))}
         </Tbody>
-      </TableComposable>
+      </Table>
     </>
   );
 }

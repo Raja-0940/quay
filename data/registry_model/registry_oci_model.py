@@ -6,8 +6,16 @@ from peewee import fn
 
 from data import database, model
 from data.cache import cache_key
-from data.database import db_disallow_replica_use, db_transaction
-from data.model import DataModelException, oci
+from data.database import (
+    Repository,
+    RepositoryKind,
+    RepositoryState,
+    User,
+    Visibility,
+    db_disallow_replica_use,
+    db_transaction,
+)
+from data.model import DataModelException, QuotaExceededException, namespacequota, oci
 from data.model.oci.retriever import RepositoryContentRetriever
 from data.readreplica import ReadOnlyModeException
 from data.registry_model.datatype import FromDictionaryException
@@ -18,6 +26,7 @@ from data.registry_model.datatypes import (
     LegacyImage,
     LikelyVulnerableTag,
     Manifest,
+    ManifestIndex,
     ManifestLayer,
     RepositoryReference,
     SecurityScanStatus,
@@ -27,12 +36,11 @@ from data.registry_model.datatypes import (
 from data.registry_model.interface import RegistryDataInterface
 from data.registry_model.label_handlers import LABEL_EXPIRY_KEY, apply_label_to_manifest
 from data.registry_model.shared import SyntheticIDHandler
-from image.docker.schema1 import (
-    DOCKER_SCHEMA1_CONTENT_TYPES,
-    DockerSchema1ManifestBuilder,
-)
+from image.docker.schema1 import DOCKER_SCHEMA1_CONTENT_TYPES
 from image.docker.schema2 import EMPTY_LAYER_BLOB_DIGEST, EMPTY_LAYER_BYTES
+from image.oci import OCI_IMAGE_INDEX_CONTENT_TYPE
 from image.shared import ManifestException
+from util.bytes import Bytes
 from util.timedeltastring import convert_to_timedelta
 
 logger = logging.getLogger(__name__)
@@ -155,12 +163,77 @@ class OCIModel(RegistryDataInterface):
             allow_hidden=allow_hidden,
             require_available=require_available,
         )
+
         if manifest is None:
             if raise_on_error:
                 raise model.ManifestDoesNotExist()
             return None
 
         return Manifest.for_manifest(manifest, self._legacy_image_id_handler)
+
+    def lookup_cached_referrers_for_manifest(
+        self, model_cache, repository_ref, manifest, artifact_type=None
+    ):
+        def load_referrers():
+            return self.lookup_referrers_for_manifest(repository_ref, manifest, artifact_type)
+
+        referrers_cache_key = cache_key.for_manifest_referrers(
+            repository_ref, manifest.digest, model_cache.cache_config
+        )
+        result = model_cache.retrieve(referrers_cache_key, load_referrers)
+        try:
+            return [Manifest.from_dict(referrer_dict) for referrer_dict in result]
+        except FromDictionaryException:
+            return self.lookup_referrers_for_manifest(repository_ref, manifest, artifact_type)
+
+    def lookup_referrers_for_manifest(self, repository_ref, manifest, artifact_type=None):
+        """
+        Looks up the referrers of a manifest under a repository.
+        Returns a manifest index.
+        """
+
+        referrers = oci.manifest.lookup_manifest_referrers(
+            manifest.repository._db_id, manifest.digest, artifact_type
+        )
+
+        referrers_manifests = [
+            Manifest.for_manifest(referrer, self._legacy_image_id_handler) for referrer in referrers
+        ]
+        referrers_digests = {r.digest for r in referrers}
+
+        # Check for existing image indices with referrers tag schema
+        referrers_tag_schema_index = self.lookup_referrers_for_tag_schema(manifest)
+        if referrers_tag_schema_index:
+            for m in referrers_tag_schema_index:
+                if (
+                    m.digest in referrers_digests
+                    or artifact_type is not None
+                    and artifact_type != m.artifact_type
+                ):
+                    continue
+                referrers_manifests.append(m)
+
+        return referrers_manifests
+
+    def lookup_referrers_for_tag_schema(self, manifest):
+        retriever = RepositoryContentRetriever(manifest.repository._db_id, None)
+
+        referrers_tag_schema_tag = oci.tag.get_tag(
+            manifest.repository._db_id,
+            "-".join(manifest.digest.split(":", 1)),
+        )
+
+        if (
+            referrers_tag_schema_tag
+            and referrers_tag_schema_tag.manifest.media_type.name == OCI_IMAGE_INDEX_CONTENT_TYPE
+        ):
+            tag_schema_index = ManifestIndex.for_manifest_index(
+                referrers_tag_schema_tag.manifest, self._legacy_image_id_handler
+            )
+            if tag_schema_index:
+                return tag_schema_index.manifests(retriever, self._legacy_image_id_handler)
+
+        return []
 
     def create_manifest_label(self, manifest, key, value, source_type_name, media_type_name=None):
         """
@@ -242,15 +315,17 @@ class OCIModel(RegistryDataInterface):
         """
         return Label.for_label(oci.label.delete_manifest_label(label_uuid, manifest._db_id))
 
-    def lookup_active_repository_tags(self, repository_ref, start_pagination_id, limit):
+    def lookup_active_repository_tags(self, repository_ref, last_pagination_tag_name, limit):
         """
-        Returns a page of actvie tags in a repository.
+        Returns a page of active tags in a repository and has_more to indicate if there are more.
 
         Note that the tags returned by this method are ShallowTag objects, which only contain the
         tag name.
         """
-        tags = oci.tag.lookup_alive_tags_shallow(repository_ref._db_id, start_pagination_id, limit)
-        return [ShallowTag.for_tag(tag) for tag in tags]
+        tags, has_more = oci.tag.lookup_alive_tags_shallow(
+            repository_ref._db_id, last_pagination_tag_name, limit
+        )
+        return [ShallowTag.for_tag(tag) for tag in tags], has_more
 
     def list_all_active_repository_tags(self, repository_ref):
         """
@@ -335,7 +410,13 @@ class OCIModel(RegistryDataInterface):
         return Tag.for_tag(tag, self._legacy_image_id_handler)
 
     def create_manifest_and_retarget_tag(
-        self, repository_ref, manifest_interface_instance, tag_name, storage, raise_on_error=False
+        self,
+        repository_ref,
+        manifest_interface_instance,
+        tag_name,
+        storage,
+        raise_on_error=False,
+        verify_quota=False,
     ):
         """
         Creates a manifest in a repository, adding all of the necessary data in the model.
@@ -401,6 +482,21 @@ class OCIModel(RegistryDataInterface):
                     expiration_seconds = expiration_td.total_seconds()
                 except ValueError:
                     pass
+
+            if verify_quota:
+                quota = namespacequota.verify_namespace_quota(repository_ref)
+                if quota["severity_level"] == "Warning":
+                    namespacequota.notify_organization_admins(repository_ref, "quota_warning")
+                elif quota["severity_level"] == "Reject":
+                    namespacequota.notify_organization_admins(repository_ref, "quota_error")
+
+                    # Exiting here leaves the manifest without a tag causing it to not be picked
+                    # up by garbage collection. Create an expired temporary tag so it can be picked
+                    # up by GC.
+                    if created_manifest.newly_created:
+                        oci.tag.create_temporary_tag_outside_timemachine(created_manifest.manifest)
+
+                    raise QuotaExceededException()
 
             # Re-target the tag to it.
             tag = oci.tag.retarget_tag(
@@ -499,7 +595,7 @@ class OCIModel(RegistryDataInterface):
 
             return Tag.for_tag(tag, self._legacy_image_id_handler)
 
-    def delete_tag(self, repository_ref, tag_name):
+    def delete_tag(self, model_cache, repository_ref, tag_name):
         """
         Deletes the latest, *active* tag with the given name in the repository.
         """
@@ -508,9 +604,14 @@ class OCIModel(RegistryDataInterface):
             if deleted_tag is None:
                 return None
 
+            manifest_cache_key = cache_key.for_repository_manifest(
+                deleted_tag.repository.id, deleted_tag.manifest.digest, model_cache.cache_config
+            )
+            model_cache.invalidate(manifest_cache_key)
+
             return Tag.for_tag(deleted_tag, self._legacy_image_id_handler)
 
-    def delete_tags_for_manifest(self, manifest):
+    def delete_tags_for_manifest(self, model_cache, manifest):
         """
         Deletes all tags pointing to the given manifest, making the manifest inaccessible for
         pulling.
@@ -518,6 +619,11 @@ class OCIModel(RegistryDataInterface):
         Returns the tags (ShallowTag) deleted. Returns None on error.
         """
         with db_disallow_replica_use():
+            manifest_cache_key = cache_key.for_repository_manifest(
+                manifest.repository.id, manifest.digest, model_cache.cache_config
+            )
+            model_cache.invalidate(manifest_cache_key)
+
             deleted_tags = oci.tag.delete_tags_for_manifest(manifest._db_id)
             return [ShallowTag.for_tag(tag) for tag in deleted_tags]
 
@@ -711,19 +817,68 @@ class OCIModel(RegistryDataInterface):
 
         return RepositoryReference.for_repo_obj(repo)
 
+    @staticmethod
+    def get_repository_response_as_json(val):
+        return {
+            "id": val.id,
+            "visibility": {
+                "id": val.visibility.id,
+                "name": val.visibility.name,
+            },
+            "kind": {
+                "id": val.kind.id,
+                "name": val.kind.name,
+            },
+            "state": val.state,
+            "namespace_user": {
+                "stripe_id": val.namespace_user.stripe_id,
+            },
+        }
+
+    @staticmethod
+    def get_repository_response_to_object(val):
+        return Repository(
+            id=val["id"],
+            state=RepositoryState(val["state"]),
+            kind=RepositoryKind(id=val["kind"]["id"], name=val["kind"]["name"]),
+            visibility=Visibility(id=val["visibility"]["id"], name=val["visibility"]["name"]),
+            namespace_user=User(stripe_id=val["namespace_user"]["stripe_id"]),
+        )
+
     def lookup_repository(
-        self, namespace_name, repo_name, kind_filter=None, raise_on_error=False, manifest_ref=None
+        self,
+        namespace_name,
+        repo_name,
+        kind_filter=None,
+        raise_on_error=False,
+        manifest_ref=None,
+        model_cache=None,
     ):
         """
         Looks up and returns a reference to the repository with the given namespace and name, or
         None if none.
         """
-        repo = model.repository.get_repository(namespace_name, repo_name, kind_filter=kind_filter)
+
+        def get_repository_loader():
+            result = model.repository.get_repository(
+                namespace_name, repo_name, kind_filter=kind_filter
+            )
+            return OCIModel.get_repository_response_as_json(result) if result else None
+
+        if model_cache is not None:
+            repository_lookup_key = cache_key.for_repository_lookup(
+                namespace_name, repo_name, manifest_ref, kind_filter, model_cache.cache_config
+            )
+            repo = model_cache.retrieve(repository_lookup_key, get_repository_loader)
+        else:
+            repo = get_repository_loader()
+
         if repo is None:
             if raise_on_error:
                 raise model.RepositoryDoesNotExist()
             return None
 
+        repo = OCIModel.get_repository_response_to_object(repo)
         state = repo.state
         return RepositoryReference.for_repo_obj(
             repo,
@@ -747,8 +902,53 @@ class OCIModel(RegistryDataInterface):
         namespace = model.user.get_namespace_user(namespace_name)
         return namespace is not None and namespace.enabled
 
+    def lookup_cached_manifest_by_digest(
+        self,
+        model_cache,
+        repository_ref,
+        manifest_digest,
+        allow_dead=False,
+        allow_hidden=False,
+        require_available=False,
+        raise_on_error=False,
+    ):
+        def load_manifest():
+            manifest = self.lookup_manifest_by_digest(
+                repository_ref,
+                manifest_digest,
+                allow_dead,
+                allow_hidden,
+                require_available,
+                raise_on_error,
+            )
+
+            if manifest:
+                manifest_dict = manifest.asdict()
+                manifest_dict["internal_manifest_bytes"] = manifest_dict[
+                    "internal_manifest_bytes"
+                ].as_unicode()
+                manifest_dict["inputs"]["repository"] = manifest_dict["inputs"][
+                    "repository"
+                ].asdict()
+                manifest_dict["inputs"]["legacy_image_handler"] = None  # TODO(kleesc): Remove
+                manifest_dict["inputs"]["legacy_id_handler"] = None  # TODO(kleesc): Remove
+
+                return manifest_dict
+
+        manifest_cache_key = cache_key.for_repository_manifest(
+            repository_ref.id, manifest_digest, model_cache.cache_config
+        )
+
+        result = model_cache.retrieve(manifest_cache_key, load_manifest)
+        # TODO(kleesc): cleanup this Manifest interface to avoid explicit conversions
+        result["internal_manifest_bytes"] = Bytes.for_string_or_unicode(
+            result["internal_manifest_bytes"]
+        )
+
+        return Manifest.from_dict(result)
+
     def lookup_cached_active_repository_tags(
-        self, model_cache, repository_ref, start_pagination_id, limit
+        self, model_cache, repository_ref, last_pagination_tag_name, limit
     ):
         """
         Returns a page of active tags in a repository.
@@ -759,18 +959,22 @@ class OCIModel(RegistryDataInterface):
         """
 
         def load_tags():
-            tags = self.lookup_active_repository_tags(repository_ref, start_pagination_id, limit)
-            return [tag.asdict() for tag in tags]
+            tags, has_more = self.lookup_active_repository_tags(
+                repository_ref, last_pagination_tag_name, limit
+            )
+            return [tag.asdict() for tag in tags], has_more
 
         tags_cache_key = cache_key.for_active_repo_tags(
-            repository_ref._db_id, start_pagination_id, limit, model_cache.cache_config
+            repository_ref._db_id, last_pagination_tag_name, limit, model_cache.cache_config
         )
-        result = model_cache.retrieve(tags_cache_key, load_tags)
+        result, has_more = tuple(model_cache.retrieve(tags_cache_key, load_tags))
 
         try:
-            return [ShallowTag.from_dict(tag_dict) for tag_dict in result]
+            return [ShallowTag.from_dict(tag_dict) for tag_dict in result], has_more
         except FromDictionaryException:
-            return self.lookup_active_repository_tags(repository_ref, start_pagination_id, limit)
+            return self.lookup_active_repository_tags(
+                repository_ref, last_pagination_tag_name, limit
+            )
 
     def get_cached_namespace_region_blacklist(self, model_cache, namespace_name):
         """

@@ -29,11 +29,10 @@ from data.model import (
 from data.model.oci.manifest import is_child_manifest
 from data.model.proxy_cache import get_proxy_cache_config_for_org
 from data.model.quota import (
-    add_blob_size,
-    blob_exists_in_namespace,
+    QuotaOperation,
     get_namespace_id_from_repository,
     is_blob_alive,
-    reset_backfill,
+    update_quota,
 )
 from data.model.repository import create_repository, get_repository
 from data.registry_model.blobuploader import (
@@ -92,7 +91,13 @@ class ProxyModel(OCIModel):
         self._proxy = Proxy(self._config, repo_name)
 
     def lookup_repository(
-        self, namespace_name, repo_name, kind_filter=None, raise_on_error=False, manifest_ref=None
+        self,
+        namespace_name,
+        repo_name,
+        kind_filter=None,
+        raise_on_error=False,
+        manifest_ref=None,
+        model_cache=None,
     ):
         """
         Looks up and returns a reference to the repository with the given namespace and name, or
@@ -256,6 +261,11 @@ class ProxyModel(OCIModel):
             return wrapped_manifest
 
         db_tag = oci.tag.get_tag_by_manifest_id(repository_ref.id, wrapped_manifest.id)
+        if db_tag is None:
+            oci.manifest.lookup_manifest(
+                repository_ref.id, manifest_digest, allow_dead=True, require_available=True
+            )
+            db_tag = oci.tag.get_tag_by_manifest_id(repository_ref.id, wrapped_manifest.id)
         existing_tag = Tag.for_tag(
             db_tag, self._legacy_image_id_handler, manifest_row=db_tag.manifest
         )
@@ -673,12 +683,8 @@ class ProxyModel(OCIModel):
         except ManifestBlob.DoesNotExist:
             ManifestBlob.create(manifest_id=manifest_id, blob=blob, repository_id=repo_id)
 
-            # Add blobs to namespace/repo total. If feature is not enabled the total
-            # should be marked stale
-            if features.QUOTA_MANAGEMENT:
-                add_blob_size(repo_id, manifest_id, {blob.id: blob.image_size})
-            else:
-                reset_backfill(repo_id)
+            # Add blob sizes if quota management is enabled
+            update_quota(repo_id, manifest_id, {blob.id: blob.image_size}, QuotaOperation.ADD)
 
         return blob
 

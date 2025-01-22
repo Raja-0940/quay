@@ -1,7 +1,14 @@
-import {Dropdown, DropdownItem, DropdownToggle} from '@patternfly/react-core';
 import {useEffect, useState} from 'react';
+import {
+  Dropdown,
+  DropdownItem,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
+} from '@patternfly/react-core';
 import {ITeamRepoPerms} from 'src/hooks/UseTeams';
 import {RepoPermissionDropdownItems} from 'src/routes/RepositoriesList/RobotAccountsList';
+import {titleCase} from 'src/libs/utils';
 
 export function SetRepoPermForTeamRoleDropDown(
   props: SetRepoPermForTeamRoleDropDownProps,
@@ -30,25 +37,33 @@ export function SetRepoPermForTeamRoleDropDown(
     <Dropdown
       data-testid={`${props.repoPerm.repoName}-role-dropdown`}
       onSelect={() => setIsOpen(false)}
-      toggle={
-        <DropdownToggle onToggle={() => setIsOpen(!isOpen)}>
-          {dropdownValue
-            ? dropdownValue?.charAt(0).toUpperCase() + dropdownValue?.slice(1)
-            : 'None'}
-        </DropdownToggle>
-      }
-      isOpen={isOpen}
-      dropdownItems={RepoPermissionDropdownItems.map((item) => (
-        <DropdownItem
-          data-testid={`${props.repoPerm.repoName}-${item.name}`}
-          key={item.name}
-          description={item.description}
-          onClick={() => dropdownOnSelect(item.name)}
+      toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+        <MenuToggle
+          ref={toggleRef}
+          onClick={() => setIsOpen(!isOpen)}
+          isExpanded={isOpen}
+          data-testid={`${props.repoPerm.repoName}-role-dropdown-toggle`}
         >
-          {item.name}
-        </DropdownItem>
-      ))}
-    />
+          {dropdownValue ? titleCase(dropdownValue) : 'None'}
+        </MenuToggle>
+      )}
+      isOpen={isOpen}
+      onOpenChange={(isOpen) => setIsOpen(isOpen)}
+      shouldFocusToggleOnSelect
+    >
+      <DropdownList>
+        {RepoPermissionDropdownItems.map((item) => (
+          <DropdownItem
+            data-testid={`${props.repoPerm.repoName}-${item.name}`}
+            key={item.name}
+            description={item.description}
+            onClick={() => dropdownOnSelect(item.name)}
+          >
+            {item.name}
+          </DropdownItem>
+        ))}
+      </DropdownList>
+    </Dropdown>
   );
 }
 

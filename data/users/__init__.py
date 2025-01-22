@@ -10,8 +10,10 @@ from data.users.apptoken import AppTokenInternalAuth
 from data.users.database import DatabaseUsers
 from data.users.externaljwt import ExternalJWTAuthN
 from data.users.externalldap import LDAPUsers
+from data.users.externaloidc import OIDCUsers
 from data.users.federated import FederatedUsers
 from data.users.keystone import get_keystone_users
+from oauth.oidc import OIDCLoginService
 from util.config.superusermanager import ConfigUserManager
 from util.security.aes import AESCipher
 from util.security.secret import convert_secret_key
@@ -35,13 +37,16 @@ def get_federated_service_name(authentication_type):
     if authentication_type == "Database":
         return None
 
+    if authentication_type == "OIDC":
+        return "oidc"
+
     raise Exception("Unknown auth type: %s" % authentication_type)
 
 
 LDAP_CERT_FILENAME = "ldap.crt"
 
 
-def get_users_handler(config, _, override_config_dir):
+def get_users_handler(config, _, override_config_dir, oauth_login):
     """
     Returns a users handler for the authentication configured in the given config object.
     """
@@ -58,11 +63,15 @@ def get_users_handler(config, _, override_config_dir):
         user_rdn = config.get("LDAP_USER_RDN", [])
         uid_attr = config.get("LDAP_UID_ATTR", "uid")
         email_attr = config.get("LDAP_EMAIL_ATTR", "mail")
+        memberof_attr = config.get("LDAP_MEMBEROF_ATTR", "memberOf")
         secondary_user_rdns = config.get("LDAP_SECONDARY_USER_RDNS", [])
         timeout = config.get("LDAP_TIMEOUT")
         network_timeout = config.get("LDAP_NETWORK_TIMEOUT")
         ldap_user_filter = config.get("LDAP_USER_FILTER", None)
         ldap_superuser_filter = config.get("LDAP_SUPERUSER_FILTER", None)
+        ldap_global_readonly_superuser_filter = config.get(
+            "LDAP_GLOBAL_READONLY_SUPERUSER_FILTER", None
+        )
         ldap_restricted_user_filter = config.get("LDAP_RESTRICTED_USER_FILTER", None)
         ldap_referrals = int(config.get("LDAP_FOLLOW_REFERRALS", True))
 
@@ -75,6 +84,7 @@ def get_users_handler(config, _, override_config_dir):
             user_rdn,
             uid_attr,
             email_attr,
+            memberof_attr,
             allow_tls_fallback,
             secondary_user_rdns=secondary_user_rdns,
             requires_email=features.MAILING,
@@ -82,6 +92,7 @@ def get_users_handler(config, _, override_config_dir):
             network_timeout=network_timeout,
             ldap_user_filter=ldap_user_filter,
             ldap_superuser_filter=ldap_superuser_filter,
+            ldap_global_readonly_superuser_filter=ldap_global_readonly_superuser_filter,
             ldap_restricted_user_filter=ldap_restricted_user_filter,
             ldap_referrals=ldap_referrals,
         )
@@ -133,21 +144,41 @@ def get_users_handler(config, _, override_config_dir):
 
         return AppTokenInternalAuth()
 
+    if authentication_type == "OIDC" and oauth_login:
+        for service in oauth_login.services:
+            if isinstance(service, OIDCLoginService):
+                config = service.config
+                client_id = config.get("CLIENT_ID", None)
+                client_secret = config.get("CLIENT_SECRET", None)
+                oidc_server = config.get("OIDC_SERVER", None)
+                service_name = config.get("SERVICE_NAME", None)
+                login_scopes = config.get("LOGIN_SCOPES", None)
+                preferred_group_claim_name = config.get("PREFERRED_GROUP_CLAIM_NAME", None)
+
+                return OIDCUsers(
+                    client_id,
+                    client_secret,
+                    oidc_server,
+                    service_name,
+                    login_scopes,
+                    preferred_group_claim_name,
+                )
+
     raise RuntimeError("Unknown authentication type: %s" % authentication_type)
 
 
 class UserAuthentication(object):
-    def __init__(self, app=None, config_provider=None, override_config_dir=None):
+    def __init__(self, app=None, config_provider=None, override_config_dir=None, oauth_login=None):
         self.secret_key = None
         self.app = app
         if app is not None:
-            self.state = self.init_app(app, config_provider, override_config_dir)
+            self.state = self.init_app(app, config_provider, override_config_dir, oauth_login)
         else:
             self.state = None
 
-    def init_app(self, app, config_provider, override_config_dir):
+    def init_app(self, app, config_provider, override_config_dir, oauth_login):
         self.secret_key = convert_secret_key(app.config["SECRET_KEY"])
-        users = get_users_handler(app.config, config_provider, override_config_dir)
+        users = get_users_handler(app.config, config_provider, override_config_dir, oauth_login)
 
         # register extension with app
         app.extensions = getattr(app, "extensions", {})
@@ -335,6 +366,9 @@ class UserAuthentication(object):
     def is_superuser(self, username):
         return self.state.is_superuser(username)
 
+    def is_global_readonly_superuser(self, username):
+        return self.state.is_global_readonly_superuser(username)
+
     def has_superusers(self):
         return self.state.has_superusers()
 
@@ -371,6 +405,12 @@ class UserManager(object):
 
         return self.state.is_restricted_user(username)
 
+    def is_superuser(self, username):
+        if not features.SUPER_USERS:
+            return False
+
+        return self.state.is_superuser(username)
+
 
 class FederatedUserManager(ConfigUserManager):
     """
@@ -404,10 +444,14 @@ class FederatedUserManager(ConfigUserManager):
         if super().restricted_whitelist_is_set() and not super().is_restricted_user(username):
             return False
 
-        return self.federated_users.is_restricted_user(username)
+        return self.federated_users.is_restricted_user(username) or super().is_restricted_user(
+            username
+        )
 
     def has_restricted_users(self) -> bool:
         return self.federated_users.has_restricted_users() or super().has_restricted_users()
 
     def is_global_readonly_superuser(self, username: str) -> bool:
-        return super().is_global_readonly_superuser(username)
+        return self.federated_users.is_global_readonly_superuser(
+            username
+        ) or super().is_global_readonly_superuser(username)

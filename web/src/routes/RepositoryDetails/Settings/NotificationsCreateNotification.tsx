@@ -1,41 +1,59 @@
+import {useState} from 'react';
 import {
   Alert,
   AlertActionCloseButton,
   Dropdown,
   DropdownItem,
-  DropdownToggle,
+  DropdownList,
   Form,
   FormGroup,
+  MenuToggle,
+  MenuToggleElement,
   Title,
 } from '@patternfly/react-core';
-import {useState} from 'react';
 import './NotificationsCreateNotification.css';
 import Conditional from 'src/components/empty/Conditional';
-import {NotificationEvent, useEvents} from 'src/hooks/UseEvents';
+import {
+  NotificationEvent,
+  NotificationEventConfig,
+  useEvents,
+} from 'src/hooks/UseEvents';
 import {
   NotificationMethod,
   useNotificationMethods,
 } from 'src/hooks/UseNotificationMethods';
-import {NotificationMethodType} from 'src/resources/NotificationResource';
+import {
+  NotificationEventType,
+  NotificationMethodType,
+} from 'src/resources/NotificationResource';
 import CreateEmailNotification from './NotificationsCreateNotificationEmail';
 import CreateFlowdockNotification from './NotificationsCreateNotificationFlowdock';
 import CreateHipchatNotification from './NotificationsCreateNotificationHipchat';
 import CreateQuayNotification from './NotificationsCreateNotificationQuay';
 import CreateSlackNotification from './NotificationsCreateNotificationSlack';
 import CreateWebhookNotification from './NotificationsCreateNotificationWebhook';
+import RepoEventExpiry from './RepoEventExpiry';
 
 export default function CreateNotification(props: CreateNotificationProps) {
-  const [isEventOpen, setIsEventOpen] = useState<boolean>();
-  const [isMethodOpen, setIsMethodOpen] = useState<boolean>();
+  const [isEventOpen, setIsEventOpen] = useState(false);
+  const [isMethodOpen, setIsMethodOpen] = useState(false);
   const [event, setEvent] = useState<NotificationEvent>();
   const [method, setMethod] = useState<NotificationMethod>();
+  const [eventConfig, setEventConfig] = useState<NotificationEventConfig>({});
   const {events} = useEvents();
   const {notificationMethods} = useNotificationMethods();
   const [error, setError] = useState<string>('');
 
+  const isValidateConfig = () => {
+    if (event?.type == NotificationEventType.imageExpiry) {
+      return eventConfig?.days != undefined && eventConfig?.days > 0;
+    }
+    return true;
+  };
+
   return (
     <>
-      <Title headingLevel="h3">Create Notification</Title>
+      <Title headingLevel="h3">Create notification</Title>
       <Form id="create-notification-form">
         <Conditional if={error != ''}>
           <Alert
@@ -50,23 +68,38 @@ export default function CreateNotification(props: CreateNotificationProps) {
         <FormGroup fieldId="event" label="When this event occurs" isRequired>
           <Dropdown
             className="create-notification-dropdown"
-            required
             onSelect={() => setIsEventOpen(false)}
-            toggle={
-              <DropdownToggle onToggle={(isOpen) => setIsEventOpen(isOpen)}>
+            toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+              <MenuToggle
+                ref={toggleRef}
+                id="event-dropdown-toggle"
+                onClick={() => setIsEventOpen(() => !isEventOpen)}
+                isExpanded={isEventOpen}
+              >
                 {event?.title ? event?.title : 'Select event...'}
-              </DropdownToggle>
-            }
+              </MenuToggle>
+            )}
             isOpen={isEventOpen}
-            dropdownItems={events.map((event) => (
-              <Conditional key={event.type} if={event.enabled}>
-                <DropdownItem onClick={() => setEvent(event)}>
-                  {event.icon} {event.title}
-                </DropdownItem>
-              </Conditional>
-            ))}
-          />
+            onOpenChange={(isOpen) => setIsEventOpen(isOpen)}
+            shouldFocusToggleOnSelect
+          >
+            <DropdownList>
+              {events.map((event) => (
+                <Conditional key={event.type} if={event.enabled}>
+                  <DropdownItem onClick={() => setEvent(event)}>
+                    {event.icon} {event.title}
+                  </DropdownItem>
+                </Conditional>
+              ))}
+            </DropdownList>
+          </Dropdown>
         </FormGroup>
+        <Conditional if={event?.type == NotificationEventType.imageExpiry}>
+          <RepoEventExpiry
+            eventConfig={eventConfig}
+            setEventConfig={setEventConfig}
+          />
+        </Conditional>
         <FormGroup
           fieldId="method"
           label="Then issue a notification"
@@ -75,20 +108,30 @@ export default function CreateNotification(props: CreateNotificationProps) {
           <Dropdown
             className="create-notification-dropdown"
             onSelect={() => setIsMethodOpen(false)}
-            toggle={
-              <DropdownToggle onToggle={(isOpen) => setIsMethodOpen(isOpen)}>
+            toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+              <MenuToggle
+                ref={toggleRef}
+                id="method-dropdown-toggle"
+                onClick={() => setIsMethodOpen(() => !isMethodOpen)}
+                isExpanded={isMethodOpen}
+              >
                 {method?.title ? method?.title : 'Select method...'}
-              </DropdownToggle>
-            }
+              </MenuToggle>
+            )}
             isOpen={isMethodOpen}
-            dropdownItems={notificationMethods.map((method) => (
-              <Conditional key={method.type} if={method.enabled}>
-                <DropdownItem onClick={() => setMethod(method)}>
-                  {method.title}
-                </DropdownItem>
-              </Conditional>
-            ))}
-          />
+            onOpenChange={(isOpen) => setIsMethodOpen(isOpen)}
+            shouldFocusToggleOnSelect
+          >
+            <DropdownList>
+              {notificationMethods.map((method) => (
+                <Conditional key={method.type} if={method.enabled}>
+                  <DropdownItem onClick={() => setMethod(method)}>
+                    {method.title}
+                  </DropdownItem>
+                </Conditional>
+              ))}
+            </DropdownList>
+          </Dropdown>
         </FormGroup>
         <Conditional if={method?.type == NotificationMethodType.email}>
           <CreateEmailNotification
@@ -96,6 +139,8 @@ export default function CreateNotification(props: CreateNotificationProps) {
             repo={props.repo}
             event={event}
             method={method}
+            eventConfig={eventConfig}
+            isValidateConfig={isValidateConfig}
             closeDrawer={props.closeDrawer}
             setError={setError}
           />
@@ -108,6 +153,8 @@ export default function CreateNotification(props: CreateNotificationProps) {
             repo={props.repo}
             event={event}
             method={method}
+            eventConfig={eventConfig}
+            isValidateConfig={isValidateConfig}
             closeDrawer={props.closeDrawer}
             setError={setError}
           />
@@ -118,6 +165,8 @@ export default function CreateNotification(props: CreateNotificationProps) {
             repo={props.repo}
             event={event}
             method={method}
+            eventConfig={eventConfig}
+            isValidateConfig={isValidateConfig}
             closeDrawer={props.closeDrawer}
             setError={setError}
           />
@@ -128,6 +177,8 @@ export default function CreateNotification(props: CreateNotificationProps) {
             repo={props.repo}
             event={event}
             method={method}
+            eventConfig={eventConfig}
+            isValidateConfig={isValidateConfig}
             closeDrawer={props.closeDrawer}
             setError={setError}
           />
@@ -138,6 +189,8 @@ export default function CreateNotification(props: CreateNotificationProps) {
             repo={props.repo}
             event={event}
             method={method}
+            eventConfig={eventConfig}
+            isValidateConfig={isValidateConfig}
             closeDrawer={props.closeDrawer}
             setError={setError}
           />
@@ -148,6 +201,8 @@ export default function CreateNotification(props: CreateNotificationProps) {
             repo={props.repo}
             event={event}
             method={method}
+            eventConfig={eventConfig}
+            isValidateConfig={isValidateConfig}
             closeDrawer={props.closeDrawer}
             setError={setError}
           />

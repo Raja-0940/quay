@@ -20,11 +20,19 @@ import {InfoCircleIcon} from '@patternfly/react-icons';
 import axios from 'axios';
 import axiosIns from 'src/libs/axios';
 import Alerts from './Alerts';
+import OverviewList from './OverviewList/OverviewList';
+import SetupBuildTriggerRedirect from './SetupBuildtrigger/SetupBuildTriggerRedirect';
+import Conditional from 'src/components/empty/Conditional';
+import RegistryStatus from './RegistryStatus';
 
 const NavigationRoutes = [
   {
     path: NavigationPath.teamMember,
     Component: <Organization />,
+  },
+  {
+    path: NavigationPath.overviewList,
+    Component: <OverviewList />,
   },
   {
     path: NavigationPath.organizationsList,
@@ -37,6 +45,10 @@ const NavigationRoutes = [
   {
     path: NavigationPath.repositoriesList,
     Component: <RepositoriesList organizationName={null} />,
+  },
+  {
+    path: NavigationPath.setupBuildTrigger,
+    Component: <SetupBuildTriggerRedirect />,
   },
   {
     path: NavigationPath.repositoryDetail,
@@ -71,7 +83,7 @@ export function StandaloneMain() {
         isManagedSidebar
         defaultManagedSidebarIsOpen={true}
       >
-        <Banner variant="info">
+        <Banner variant="blue">
           <Flex
             spaceItems={{default: 'spaceItemsSm'}}
             justifyContent={{default: 'justifyContentCenter'}}
@@ -92,6 +104,11 @@ export function StandaloneMain() {
             </FlexItem>
           </Flex>
         </Banner>
+        <Conditional if={quayConfig?.features?.BILLING}>
+          <ErrorBoundary fallback={<>Error loading registry status</>}>
+            <RegistryStatus />
+          </ErrorBoundary>
+        </Conditional>
         <Alerts />
         <Routes>
           <Route index element={<Navigate to="/organization" replace />} />

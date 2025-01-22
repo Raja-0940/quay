@@ -10,7 +10,6 @@ describe('Repository Settings - Visibility', () => {
       });
     cy.intercept('GET', '/config', (req) =>
       req.reply((res) => {
-        res.body.features['UI_V2_REPO_SETTINGS'] = true;
         res.body.features['BILLING'] = true;
         res.body.config['STRIPE_PUBLISHABLE_KEY'] =
           'pk_test_notrealHI2qtSU2DTTO1YZ5qsXlfeGNguyaMCsceSOJmHUxdICvRN5LfNJLah4fTqzlrng3wrXiTeCucQwrf3L6Hd007iruRjQ3';
@@ -23,7 +22,6 @@ describe('Repository Settings - Visibility', () => {
   it.skip('Sets public', () => {
     cy.intercept('GET', '/config', (req) =>
       req.reply((res) => {
-        res.body.features['UI_V2_REPO_SETTINGS'] = true;
         res.body.features['BILLING'] = false;
         return res;
       }),
@@ -33,17 +31,16 @@ describe('Repository Settings - Visibility', () => {
     cy.contains(
       'This Repository is currently private. Only users on the permissions list may view and interact with it.',
     ).should('exist');
-    cy.contains('Make Public').click();
+    cy.contains('Make public').click();
     cy.contains(
       'This Repository is currently public and is visible to all users, and may be pulled by all users.',
     ).should('exist');
-    cy.contains('Make Private').should('exist');
+    cy.contains('Make private').should('exist');
   });
 
   it('Sets private', () => {
     cy.intercept('GET', '/config', (req) =>
       req.reply((res) => {
-        res.body.features['UI_V2_REPO_SETTINGS'] = true;
         res.body.features['BILLING'] = false;
         return res;
       }),
@@ -53,11 +50,11 @@ describe('Repository Settings - Visibility', () => {
     cy.contains(
       'This Repository is currently public and is visible to all users, and may be pulled by all users.',
     ).should('exist');
-    cy.contains('Make Private').click();
+    cy.contains('Make private').click();
     cy.contains(
       'This Repository is currently private. Only users on the permissions list may view and interact with it.',
     ).should('exist');
-    cy.contains('Make Public').should('exist');
+    cy.contains('Make public').should('exist');
   });
 
   it('Upgrade plan as user', () => {

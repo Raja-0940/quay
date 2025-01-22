@@ -1,30 +1,48 @@
 import {
   Button,
-  Dropdown,
-  DropdownGroup,
-  DropdownItem,
-  DropdownToggle,
-  Form,
-  FormGroup,
+  Divider,
+  MenuGroup,
+  MenuItem,
+  MenuList,
+  Flex,
+  FlexItem,
+  Icon,
+  MenuContent,
+  MenuToggle,
+  Menu,
   Switch,
+  ToggleGroup,
+  ToggleGroupItem,
   Toolbar,
   ToolbarContent,
   ToolbarGroup,
   ToolbarItem,
+  Tooltip,
+  MenuContainer,
 } from '@patternfly/react-core';
-import {UserIcon} from '@patternfly/react-icons';
-import React from 'react';
-import {useState} from 'react';
+import {
+  PowerOffIcon,
+  UserIcon,
+  WindowMaximizeIcon,
+} from '@patternfly/react-icons';
+import React, {useState} from 'react';
 import {GlobalAuthState, logoutUser} from 'src/resources/AuthResource';
 import {addDisplayError} from 'src/resources/ErrorHandling';
 import ErrorModal from '../errors/ErrorModal';
 
-import 'src/components/header/HeaderToolbar.css';
 import {useQueryClient} from '@tanstack/react-query';
+import 'src/components/header/HeaderToolbar.css';
 import {useCurrentUser} from 'src/hooks/UseCurrentUser';
+
+import MoonIcon from '@patternfly/react-icons/dist/esm/icons/moon-icon';
+import SunIcon from '@patternfly/react-icons/dist/esm/icons/sun-icon';
+import {ThemePreference, useTheme} from 'src/contexts/ThemeContext';
 
 export function HeaderToolbar() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const toggleRef = React.useRef<HTMLButtonElement>(null);
+  const {themePreference, setThemePreference} = useTheme();
 
   const queryClient = useQueryClient();
   const {user} = useCurrentUser();
@@ -34,9 +52,11 @@ export function HeaderToolbar() {
     setIsDropdownOpen((prev) => !prev);
   };
 
-  const onDropdownSelect = async (e) => {
-    setIsDropdownOpen(false);
-    switch (e.target.value) {
+  const onMenuSelect = async (
+    event: React.MouseEvent | undefined,
+    itemId: string | number | undefined,
+  ) => {
+    switch (itemId) {
       case 'logout':
         try {
           await logoutUser();
@@ -52,31 +72,146 @@ export function HeaderToolbar() {
           console.error(err);
           setErr(addDisplayError('Unable to log out', err));
         }
+        setIsDropdownOpen(false);
+        break;
+      case 'theme-selector':
         break;
       default:
+        setIsDropdownOpen(false);
         break;
     }
   };
 
-  const userDropdownItems = [
-    <DropdownGroup key="group 2">
-      <DropdownItem value="logout" key="group 2 logout" component="button">
-        Logout
-      </DropdownItem>
-    </DropdownGroup>,
-  ];
+  const userMenu = (
+    <Menu ref={menuRef} onSelect={onMenuSelect}>
+      <MenuContent>
+        <MenuGroup label="Appearance" key="theme">
+          <MenuList>
+            <MenuItem
+              itemId="theme-selector"
+              key="theme-selector"
+              component="object"
+            >
+              <ToggleGroup id="theme-toggle" aria-label="Theme toggle group">
+                <ToggleGroupItem
+                  icon={
+                    <Icon size="sm">
+                      <SunIcon />
+                    </Icon>
+                  }
+                  aria-label="light theme"
+                  aria-describedby="tooltip-auto-theme"
+                  buttonId="toggle-group-light-theme"
+                  onChange={() => {
+                    if (themePreference !== ThemePreference.LIGHT) {
+                      setThemePreference(ThemePreference.LIGHT);
+                    }
+                  }}
+                  isSelected={themePreference === ThemePreference.LIGHT}
+                />
+                <ToggleGroupItem
+                  icon={
+                    <Icon size="sm">
+                      <MoonIcon />
+                    </Icon>
+                  }
+                  aria-label="dark theme"
+                  buttonId="toggle-group-dark-theme"
+                  onChange={() => {
+                    if (themePreference !== ThemePreference.DARK) {
+                      setThemePreference(ThemePreference.DARK);
+                    }
+                  }}
+                  isSelected={themePreference === ThemePreference.DARK}
+                />
+                <ToggleGroupItem
+                  icon={
+                    <Icon size="sm">
+                      <WindowMaximizeIcon />
+                    </Icon>
+                  }
+                  aria-label="auto theme"
+                  buttonId="toggle-group-auto-theme"
+                  onChange={() => {
+                    if (themePreference !== ThemePreference.AUTO) {
+                      setThemePreference(ThemePreference.AUTO);
+                    }
+                  }}
+                  isSelected={themePreference === ThemePreference.AUTO}
+                />
+              </ToggleGroup>
+            </MenuItem>
+          </MenuList>
+        </MenuGroup>
+        <Divider />
+        <MenuGroup label="Actions" key="user">
+          <MenuList>
+            <MenuItem
+              icon={<PowerOffIcon aria-hidden />}
+              isDanger={true}
+              itemId="logout"
+              key="logout"
+              component="button"
+            >
+              Logout
+            </MenuItem>
+          </MenuList>
+        </MenuGroup>
+        <Tooltip
+          id="tooltip-light-theme"
+          content="Light theme"
+          position="bottom"
+          triggerRef={() =>
+            document.getElementById(
+              'toggle-group-light-theme',
+            ) as HTMLButtonElement
+          }
+        />
+        <Tooltip
+          id="tooltip-dark-theme"
+          content="Dark theme"
+          position="bottom"
+          triggerRef={() =>
+            document.getElementById(
+              'toggle-group-dark-theme',
+            ) as HTMLButtonElement
+          }
+        />
+        <Tooltip
+          id="tooltip-auto-theme"
+          content="Device-based theme"
+          position="bottom"
+          triggerRef={() =>
+            document.getElementById(
+              'toggle-group-auto-theme',
+            ) as HTMLButtonElement
+          }
+        />
+      </MenuContent>
+    </Menu>
+  );
 
-  const userDropdown = (
-    <Dropdown
-      position="right"
-      onSelect={(value) => onDropdownSelect(value)}
+  const toggle = (
+    <MenuToggle
+      ref={toggleRef}
+      onClick={onDropdownToggle}
+      isExpanded={isDropdownOpen}
+      icon={<UserIcon />}
+      id="user-menu-toggle"
+      aria-label="User menu"
+    >
+      {user.username}
+    </MenuToggle>
+  );
+
+  const menuContainer = (
+    <MenuContainer
+      menu={userMenu}
+      menuRef={menuRef}
       isOpen={isDropdownOpen}
-      toggle={
-        <DropdownToggle icon={<UserIcon />} onToggle={onDropdownToggle}>
-          {user.username}
-        </DropdownToggle>
-      }
-      dropdownItems={userDropdownItems}
+      toggle={toggle}
+      toggleRef={toggleRef}
+      onOpenChange={(isOpen) => setIsDropdownOpen(isOpen)}
     />
   );
 
@@ -84,7 +219,10 @@ export function HeaderToolbar() {
 
   // Toggle between old UI and new UI
   const [isChecked, setIsChecked] = React.useState<boolean>(true);
-  const toggleSwitch = (checked: boolean) => {
+  const toggleSwitch = (
+    _event: React.FormEvent<HTMLInputElement>,
+    checked: boolean,
+  ) => {
     setIsChecked(checked);
 
     // Reload page and trigger patternfly cookie removal
@@ -96,12 +234,6 @@ export function HeaderToolbar() {
     const randomArg = '?_=' + new Date().getTime();
     window.location.replace(`${protocol}//${host}/${path}/${randomArg}`);
   };
-  const toolbarSpacers = {
-    default: 'spacerNone',
-    md: 'spacerSm',
-    lg: 'spacerMd',
-    xl: 'spacerLg',
-  };
 
   return (
     <>
@@ -110,27 +242,36 @@ export function HeaderToolbar() {
         <ToolbarContent>
           <ToolbarGroup
             variant="icon-button-group"
-            alignment={{default: 'alignRight'}}
+            align={{default: 'alignRight'}}
             spacer={{default: 'spacerNone', md: 'spacerMd'}}
           >
-            <ToolbarItem spacer={toolbarSpacers}>
-              <Form isHorizontal>
-                <FormGroup
-                  label="Current UI"
-                  fieldId="horizontal-form-stacked-options"
-                >
-                  <Switch
-                    id="header-toolbar-ui-switch"
-                    label="New UI"
-                    labelOff="New UI"
-                    isChecked={isChecked}
-                    onChange={toggleSwitch}
-                  />
-                </FormGroup>
-              </Form>
+            <ToolbarItem
+              spacer={{
+                default: 'spacerNone',
+                md: 'spacerSm',
+                lg: 'spacerMd',
+                xl: 'spacerLg',
+              }}
+            >
+              <Flex
+                spaceItems={{default: 'spaceItemsMd'}}
+                flexWrap={{default: 'nowrap'}}
+                className="pf-v5-u-text-nowrap pf-v5-u-pr-md"
+              >
+                <FlexItem alignSelf={{default: 'alignSelfFlexStart'}}>
+                  Current UI
+                </FlexItem>
+                <Switch
+                  id="header-toolbar-ui-switch"
+                  label="New UI"
+                  labelOff="New UI"
+                  isChecked={isChecked}
+                  onChange={toggleSwitch}
+                />
+              </Flex>
             </ToolbarItem>
             <ToolbarItem>
-              {user.username ? userDropdown : signInButton}
+              {user.username ? menuContainer : signInButton}
             </ToolbarItem>
           </ToolbarGroup>
         </ToolbarContent>

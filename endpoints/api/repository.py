@@ -10,6 +10,7 @@ from flask import abort, request
 
 import features
 from app import (
+    app,
     dockerfile_build_queue,
     repository_gc_queue,
     tuf_metadata_api,
@@ -27,6 +28,7 @@ from data.database import RepositoryState
 from endpoints.api import (
     ApiResource,
     RepositoryParamResource,
+    allow_if_superuser,
     format_date,
     log_action,
     nickname,
@@ -139,10 +141,11 @@ class RepositoryList(ApiResource):
         namespace_name = req["namespace"] if "namespace" in req else owner.username
 
         permission = CreateRepositoryPermission(namespace_name)
-        if permission.can() and not (
+        if (permission.can() or allow_if_superuser()) and not (
             features.RESTRICTED_USERS
             and usermanager.is_restricted_user(owner.username)
             and owner.username == namespace_name
+            and owner.username not in app.config.get("SUPER_USERS", None)
         ):
 
             repository_name = req["repository"]
@@ -255,7 +258,12 @@ class RepositoryList(ApiResource):
             popularity,
         )
 
-        return {"repositories": [repo.to_dict() for repo in repos]}, next_page_token
+        if features.QUOTA_MANAGEMENT and features.EDIT_QUOTA:
+            repositories_with_view = model.add_quota_view(repos)
+        else:
+            repositories_with_view = [repo.to_dict() for repo in repos]
+
+        return {"repositories": repositories_with_view}, next_page_token
 
 
 @resource("/v1/repository/<apirepopath:repository>")

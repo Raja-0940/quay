@@ -20,6 +20,8 @@ angular.module('quay').directive('planManager', function () {
     controller: function($scope, $element, PlanService, ApiService) {
       $scope.isExistingCustomer = false;
 
+      $scope.marketplaceTotal = 0;
+
       $scope.parseDate = function(timestamp) {
         return new Date(timestamp * 1000);
       };
@@ -30,7 +32,7 @@ angular.module('quay').directive('planManager', function () {
         }
 
         // A plan is visible if it is not deprecated, or if it is the namespace's current plan.
-        if (plan['deprecated']) {
+        if (plan['deprecated'] || plan['plans_page_hidden']) {
           return subscribedPlan && plan.stripeId === subscribedPlan.stripeId;
         }
 
@@ -41,7 +43,7 @@ angular.module('quay').directive('planManager', function () {
         if (!subscribedPlan) {
           return false;
         }
-        
+
         return plan.stripeId === subscribedPlan.stripeId;
       };
 
@@ -122,4 +124,3 @@ angular.module('quay').directive('planManager', function () {
   };
   return directiveDefinitionObject;
 });
-

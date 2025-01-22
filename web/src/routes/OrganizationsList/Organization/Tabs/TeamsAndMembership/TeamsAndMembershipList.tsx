@@ -7,9 +7,16 @@ import {
   ToolbarItem,
 } from '@patternfly/react-core';
 import {useState} from 'react';
+import {useParams} from 'react-router-dom';
 import TeamsViewList from './TeamsView/TeamsViewList';
 import CollaboratorsViewList from './CollaboratorsView/CollaboratorsViewList';
 import MembersViewList from './MembersView/MembersViewList';
+import {CreateTeamModal} from '../DefaultPermissions/createPermissionDrawer/CreateTeamModal';
+import {CreateTeamWizard} from '../DefaultPermissions/createTeamWizard/CreateTeamWizard';
+import {validateTeamName} from 'src/libs/utils';
+import Conditional from 'src/components/empty/Conditional';
+import {useQuayConfig} from 'src/hooks/UseQuayConfig';
+import {useOrganization} from 'src/hooks/UseOrganization';
 
 export enum TableModeType {
   Teams = 'Teams',
@@ -17,21 +24,56 @@ export enum TableModeType {
   Collaborators = 'Collaborators',
 }
 
-export default function TeamsAndMembershipList(
-  props: TeamsAndMembershipListProps,
-) {
+export default function TeamsAndMembershipList() {
+  // state variables for Create Team
+  const [teamName, setTeamName] = useState('');
+  const [teamDescription, setTeamDescription] = useState('');
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState<boolean>(false);
+  const [isTeamWizardOpen, setIsTeamWizardOpen] = useState<boolean>(false);
+  const {organizationName} = useParams();
+  const config = useQuayConfig();
+  const {organization} = useOrganization(organizationName);
+
   const [tableMode, setTableMode] = useState<TableModeType>(
     TableModeType.Teams,
   );
 
-  const onTableModeChange: ToggleGroupItemProps['onChange'] = (
-    _isSelected,
-    event,
-  ) => {
+  const onTableModeChange: ToggleGroupItemProps['onChange'] = (event) => {
     const id = event.currentTarget.id;
     setTableMode(id);
     fetchTableItems();
   };
+
+  const createTeamModal = (
+    <CreateTeamModal
+      teamName={teamName}
+      setTeamName={setTeamName}
+      description={teamDescription}
+      setDescription={setTeamDescription}
+      orgName={organizationName}
+      nameLabel="Provide a name for your new team:"
+      descriptionLabel="Provide an optional description for your new team"
+      helperText="Enter a description to provide extra information to your teammates about this team:"
+      nameHelperText="Choose a name to inform your teammates about this team. Must match ^([a-z0-9]+(?:[._-][a-z0-9]+)*)$"
+      isModalOpen={isTeamModalOpen}
+      handleModalToggle={() => {
+        setIsTeamModalOpen(!isTeamModalOpen);
+        setTableMode(TableModeType.Teams);
+      }}
+      handleWizardToggle={() => setIsTeamWizardOpen(!isTeamWizardOpen)}
+      validateName={validateTeamName}
+    />
+  );
+
+  const createTeamWizard = (
+    <CreateTeamWizard
+      teamName={teamName}
+      teamDescription={teamDescription}
+      isTeamWizardOpen={isTeamWizardOpen}
+      handleWizardToggle={() => setIsTeamWizardOpen(!isTeamWizardOpen)}
+      orgName={organizationName}
+    />
+  );
 
   const viewToggle = (
     <Toolbar>
@@ -49,12 +91,14 @@ export default function TeamsAndMembershipList(
               buttonId={TableModeType.Members}
               isSelected={tableMode == TableModeType.Members}
               onChange={onTableModeChange}
+              isDisabled={!organization.is_admin}
             />
             <ToggleGroupItem
               text="Collaborators View"
               buttonId={TableModeType.Collaborators}
               isSelected={tableMode == TableModeType.Collaborators}
               onChange={onTableModeChange}
+              isDisabled={!organization.is_admin}
             />
           </ToggleGroup>
         </ToolbarItem>
@@ -63,30 +107,53 @@ export default function TeamsAndMembershipList(
   );
 
   const fetchTableItems = () => {
+    const renderCreateTeam = (
+      <>
+        <Conditional if={isTeamModalOpen}>{createTeamModal}</Conditional>
+        <Conditional if={isTeamWizardOpen}>{createTeamWizard}</Conditional>
+      </>
+    );
+
     if (tableMode == TableModeType.Teams) {
       return (
-        <TeamsViewList organizationName={props.organizationName}>
-          {viewToggle}
-        </TeamsViewList>
+        <>
+          {renderCreateTeam}
+          <TeamsViewList
+            organizationName={organizationName}
+            handleModalToggle={() => setIsTeamModalOpen(!isTeamModalOpen)}
+            isReadOnly={config?.registry_state === 'readonly'}
+            isAdmin={organization.is_admin}
+          >
+            {viewToggle}
+          </TeamsViewList>
+        </>
       );
     } else if (tableMode == TableModeType.Members) {
       return (
-        <MembersViewList organizationName={props.organizationName}>
-          {viewToggle}
-        </MembersViewList>
+        <>
+          {renderCreateTeam}
+          <MembersViewList
+            organizationName={organizationName}
+            handleModalToggle={() => setIsTeamModalOpen(!isTeamModalOpen)}
+          >
+            {viewToggle}
+          </MembersViewList>
+        </>
       );
     } else if (tableMode == TableModeType.Collaborators) {
       return (
-        <CollaboratorsViewList organizationName={props.organizationName}>
-          {viewToggle}
-        </CollaboratorsViewList>
+        <>
+          {renderCreateTeam}
+          <CollaboratorsViewList
+            organizationName={organizationName}
+            handleModalToggle={() => setIsTeamModalOpen(!isTeamModalOpen)}
+          >
+            {viewToggle}
+          </CollaboratorsViewList>
+        </>
       );
     }
   };
 
   return fetchTableItems();
-}
-
-interface TeamsAndMembershipListProps {
-  organizationName: string;
 }

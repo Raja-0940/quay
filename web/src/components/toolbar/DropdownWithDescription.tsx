@@ -1,6 +1,11 @@
 import {useEffect, useState} from 'react';
-import {Dropdown, DropdownItem, DropdownToggle} from '@patternfly/react-core';
-import * as React from 'react';
+import {
+  Dropdown,
+  DropdownItem,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
+} from '@patternfly/react-core';
 
 const defaultSelectedVal = 'Read';
 const defaultUnSelectedVal = 'None';
@@ -45,26 +50,36 @@ export function DropdownWithDescription(props: DropdownWithDescriptionProps) {
 
   return (
     <Dropdown
+      data-testid={`${props.repo?.name}-permission-dropdown`}
       onSelect={() => setIsOpen(false)}
-      toggle={
-        <DropdownToggle
+      toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+        <MenuToggle
+          ref={toggleRef}
           id="toggle-descriptions"
-          onToggle={(isOpen) => setIsOpen(isOpen)}
+          onClick={() => setIsOpen(() => !isOpen)}
+          isExpanded={isOpen}
+          data-testid={`${props.repo?.name}-permission-dropdown-toggle`}
         >
           {dropdownToggle}
-        </DropdownToggle>
-      }
+        </MenuToggle>
+      )}
       isOpen={isOpen}
-      dropdownItems={props.dropdownItems.map((item) => (
-        <DropdownItem
-          key={item.name}
-          description={item.description}
-          onClick={() => dropdownOnSelect(item.name, true)}
-        >
-          {item.name}
-        </DropdownItem>
-      ))}
-    />
+      onOpenChange={(isOpen) => setIsOpen(isOpen)}
+      shouldFocusToggleOnSelect
+    >
+      <DropdownList>
+        {props.dropdownItems.map((item) => (
+          <DropdownItem
+            data-testid={`${item.name}-permission-type`}
+            key={item.name}
+            description={item.description}
+            onClick={() => dropdownOnSelect(item.name, true)}
+          >
+            {item.name}
+          </DropdownItem>
+        ))}
+      </DropdownList>
+    </Dropdown>
   );
 }
 

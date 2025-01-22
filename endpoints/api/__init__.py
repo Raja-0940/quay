@@ -4,12 +4,15 @@ from calendar import timegm
 from email.utils import formatdate
 from functools import partial, wraps
 
+import pytz
 from flask import Blueprint, request, session
 from flask_restful import Api, Resource, abort, reqparse
 from flask_restful.utils import unpack
 from jsonschema import ValidationError, validate
+from werkzeug.routing.exceptions import RequestRedirect
 
 import features
+from .__init__models_pre_oci import pre_oci_model as model
 from app import app, authentication, usermanager
 from auth import scopes
 from auth.auth_context import (
@@ -30,6 +33,7 @@ from auth.permissions import (
 from data import model as data_model
 from data.database import RepositoryState
 from data.logs_model import logs_model
+from digest import digest_tools
 from endpoints.csrf import csrf_protect
 from endpoints.decorators import (
     check_anon_protection,
@@ -49,8 +53,6 @@ from util.pagination import decrypt_page_token, encrypt_page_token
 from util.request import crossorigin, get_request_ip
 from util.timedeltastring import convert_to_timedelta
 
-from .__init__models_pre_oci import pre_oci_model as model
-
 logger = logging.getLogger(__name__)
 api_bp = timed_blueprint(Blueprint("api", __name__))
 
@@ -62,6 +64,12 @@ class ApiExceptionHandlingApi(Api):
     @crossorigin()
     def handle_error(self, error):
         return super(ApiExceptionHandlingApi, self).handle_error(error)
+
+    def _should_use_fr_error_handler(self):
+        try:
+            return super(ApiExceptionHandlingApi, self)._should_use_fr_error_handler()
+        except RequestRedirect:
+            return False
 
 
 api = ApiExceptionHandlingApi()
@@ -308,7 +316,11 @@ def disallow_for_non_normal_repositories(func):
 
 
 def require_repo_permission(permission_class, scope, allow_public=False):
-    def _require_permission(allow_for_superuser=False, disallow_for_restricted_user=False):
+    def _require_permission(
+        allow_for_superuser=False,
+        disallow_for_restricted_user=False,
+        allow_for_global_readonly_superuser=False,
+    ):
         def wrapper(func):
             @add_method_metadata("oauth2_scope", scope)
             @wraps(func)
@@ -343,6 +355,9 @@ def require_repo_permission(permission_class, scope, allow_public=False):
 
                     if user is not None and SuperUserPermission().can():
                         return func(self, namespace, repository, *args, **kwargs)
+
+                if allow_for_global_readonly_superuser and allow_if_global_readonly_superuser():
+                    return func(self, namespace, repository, *args, **kwargs)
 
                 raise Unauthorized()
 
@@ -400,8 +415,104 @@ require_user_read = require_user_permission(UserReadPermission, scopes.READ_USER
 require_user_admin = require_user_permission(UserAdminPermission, scopes.ADMIN_USER)
 
 
+def log_unauthorized(audit_event):
+    def inner(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except endpoints.v2.errors.Unauthorized as e:
+
+                if (
+                    (
+                        app.config.get("ACTION_LOG_AUDIT_PUSH_FAILURES")
+                        and audit_event == "push_repo_failed"
+                    )
+                    or (
+                        app.config.get("ACTION_LOG_AUDIT_PULL_FAILURES")
+                        and audit_event == "pull_repo_failed"
+                    )
+                    or (
+                        app.config.get("ACTION_LOG_AUDIT_DELETE_FAILURES")
+                        and audit_event == "delete_tag_failed"
+                    )
+                ):
+                    if "namespace_name" in kwargs and "repo_name" in kwargs:
+                        metadata = {
+                            "namespace": kwargs["namespace_name"],
+                            "repo": kwargs["repo_name"],
+                        }
+
+                        if "manifest_ref" in kwargs:
+                            try:
+                                digest = digest_tools.Digest.parse_digest(kwargs["manifest_ref"])
+                                metadata["manifest_digest"] = str(digest)
+                            except digest_tools.InvalidDigestException:
+                                metadata["tag"] = kwargs["manifest_ref"]
+
+                        user_or_orgname = data_model.user.get_user_or_org(kwargs["namespace_name"])
+
+                        if user_or_orgname is not None:
+                            repo = data_model.repository.get_repository(
+                                user_or_orgname.username, kwargs["repo_name"]
+                            )
+                        else:
+                            repo = None
+
+                        if user_or_orgname is None:
+                            metadata["message"] = "Namespace does not exist"
+                            log_action(
+                                kind=audit_event,
+                                user_or_orgname=None,
+                                metadata=metadata,
+                            )
+                        elif repo is None:
+                            metadata["message"] = "Repository does not exist"
+                            log_action(
+                                kind=audit_event,
+                                user_or_orgname=user_or_orgname.username,
+                                metadata=metadata,
+                            )
+                        else:
+                            metadata["message"] = str(e)
+                            log_action(
+                                kind=audit_event,
+                                user_or_orgname=user_or_orgname.username,
+                                repo_name=repo.name,
+                                metadata=metadata,
+                            )
+
+                logger.debug("Unauthorized request: %s", e)
+
+                raise e
+
+        return wrapper
+
+    return inner
+
+
+log_unauthorized_pull = log_unauthorized("pull_repo_failed")
+log_unauthorized_push = log_unauthorized("push_repo_failed")
+log_unauthorized_delete = log_unauthorized("delete_tag_failed")
+
+
 def allow_if_superuser():
-    return app.config.get("FEATURE_SUPERUSERS_FULL_ACCESS", False) and SuperUserPermission().can()
+    return bool(features.SUPERUSERS_FULL_ACCESS and SuperUserPermission().can())
+
+
+def allow_if_global_readonly_superuser():
+    if (
+        app.config.get("LDAP_GLOBAL_READONLY_SUPERUSER_FILTER", None) is None
+        and app.config.get("GLOBAL_READONLY_SUPER_USERS", None) is None
+    ):
+        return False
+
+    context = get_authenticated_context()
+    return (
+        context is not None
+        and context.authed_user is not None
+        and usermanager.is_global_readonly_superuser(context.authed_user.username)
+    )
 
 
 def verify_not_prod(func):
@@ -438,7 +549,7 @@ def require_fresh_login(func):
         )
 
         if (
-            last_login >= valid_span
+            last_login.replace(tzinfo=pytz.UTC) >= valid_span.replace(tzinfo=pytz.UTC)
             or not authentication.supports_fresh_login
             or not authentication.has_password_set(user.username)
         ):
@@ -482,7 +593,7 @@ def validate_json_request(schema_name, optional=False):
         def wrapped(self, *args, **kwargs):
             schema = self.schemas[schema_name]
             try:
-                json_data = request.get_json()
+                json_data = request.get_json(silent=optional)
                 if json_data is None:
                     if not optional:
                         raise InvalidRequest("Missing JSON body")
@@ -507,7 +618,7 @@ def request_error(exception=None, **kwargs):
     raise InvalidRequest(message, data)
 
 
-def log_action(kind, user_or_orgname, metadata=None, repo=None, repo_name=None):
+def log_action(kind, user_or_orgname, metadata=None, repo=None, repo_name=None, performer=None):
     if not metadata:
         metadata = {}
 
@@ -517,7 +628,8 @@ def log_action(kind, user_or_orgname, metadata=None, repo=None, repo_name=None):
         metadata["oauth_token_application_id"] = oauth_token.application.client_id
         metadata["oauth_token_application"] = oauth_token.application.name
 
-    performer = get_authenticated_user()
+    if performer is None:
+        performer = get_authenticated_user()
 
     if repo_name is not None:
         repo = data_model.repository.get_repository(user_or_orgname, repo_name)
@@ -584,6 +696,7 @@ import endpoints.api.mirror
 import endpoints.api.namespacequota
 import endpoints.api.organization
 import endpoints.api.permission
+import endpoints.api.policy
 import endpoints.api.prototype
 import endpoints.api.repoemail
 import endpoints.api.repository

@@ -34,6 +34,8 @@ from auth.permissions import (
 from data import model
 from data.billing import get_plan
 from data.database import Repository as RepositoryTable
+from data.model.notification import delete_notifications_by_kind
+from data.model.oauth import get_assigned_authorization_for_user
 from data.users.shared import can_create_user
 from endpoints.api import (
     ApiResource,
@@ -186,7 +188,7 @@ def user_view(user, previous_username=None):
             }
         )
 
-        if features.QUOTA_MANAGEMENT:
+        if features.QUOTA_MANAGEMENT and features.EDIT_QUOTA:
             quotas = model.namespacequota.get_namespace_quota_list(user.username)
             user_response["quotas"] = [quota_view(quota) for quota in quotas] if quotas else []
             user_response["quota_report"] = model.namespacequota.get_quota_for_view(user.username)
@@ -638,11 +640,13 @@ class PrivateRepositories(ApiResource):
                     repos_allowed = plan["privateRepos"]
         if features.RH_MARKETPLACE:
             # subscriptions in marketplace will get added to private repo count
-            user_account_number = marketplace_users.get_account_number(user)
-            if user_account_number:
-                subscriptions = marketplace_subscriptions.get_list_of_subscriptions(
-                    user_account_number, filter_out_org_bindings=True, convert_to_stripe_plans=True
-                )
+            user_account_numbers = marketplace_users.get_account_number(user)
+            if user_account_numbers:
+                subscriptions = []
+                for account_number in user_account_numbers:
+                    subscriptions += marketplace_subscriptions.get_list_of_subscriptions(
+                        account_number, filter_out_org_bindings=True, convert_to_stripe_plans=True
+                    )
                 for user_subscription in subscriptions:
                     repos_allowed += user_subscription["privateRepos"]
 
@@ -720,6 +724,22 @@ def conduct_signin(username_or_email, password, invite_code=None):
             needs_email_verification = True
 
     else:
+        if app.config.get("ACTION_LOG_AUDIT_LOGIN_FAILURES"):
+            possible_user = model.user.get_nonrobot_user(
+                username_or_email
+            ) or model.user.find_user_by_email(username_or_email)
+            log_action(
+                "login_failure",
+                possible_user.username if possible_user else None,
+                {
+                    "type": "quayauth",
+                    "kind": "user",
+                    "useragent": request.user_agent.string,
+                    "username": username_or_email,
+                    "message": error_message,
+                },
+                performer=possible_user,
+            )
         invalid_credentials = True
 
     return (
@@ -1170,6 +1190,28 @@ def authorization_view(access_token):
     }
 
 
+def assigned_authorization_view(assigned_authorization):
+    oauth_app = assigned_authorization.application
+    app_email = oauth_app.avatar_email or oauth_app.organization.email
+    return {
+        "application": {
+            "name": oauth_app.name,
+            "clientId": oauth_app.client_id,
+            "description": oauth_app.description,
+            "url": oauth_app.application_uri,
+            "avatar": avatar.get_data(oauth_app.name, app_email, "app"),
+            "organization": {
+                "name": oauth_app.organization.username,
+                "avatar": avatar.get_data_for_org(oauth_app.organization),
+            },
+        },
+        "uuid": assigned_authorization.uuid,
+        "redirectUri": assigned_authorization.redirect_uri,
+        "scopes": scopes.get_scope_information(assigned_authorization.scope),
+        "responseType": assigned_authorization.response_type,
+    }
+
+
 @resource("/v1/user/authorizations")
 @internal_only
 class UserAuthorizationList(ApiResource):
@@ -1206,6 +1248,45 @@ class UserAuthorization(ApiResource):
             raise NotFound()
 
         access_token.delete_instance(recursive=True, delete_nullable=True)
+        return "", 204
+
+
+@resource("/v1/user/assignedauthorization")
+@show_if(features.ASSIGN_OAUTH_TOKEN)
+@internal_only
+class UserAssignedAuthorizations(ApiResource):
+    @require_user_admin()
+    @nickname("listAssignedAuthorizations")
+    def get(self):
+        user = get_authenticated_user()
+
+        assignments = model.oauth.list_assigned_authorizations_for_user(user)
+
+        # Delete any notifications for assigned authorizations, since they have now been viewed
+        delete_notifications_by_kind(user, "assigned_authorization")
+
+        return {
+            "authorizations": [
+                assigned_authorization_view(assignment) for assignment in assignments
+            ]
+        }
+
+
+@resource("/v1/user/assignedauthorization/<assigned_authorization_uuid>")
+@show_if(features.ASSIGN_OAUTH_TOKEN)
+@internal_only
+class UserAssignedAuthorization(ApiResource):
+    @require_user_admin()
+    @nickname("deleteAssignedAuthorization")
+    def delete(self, assigned_authorization_uuid):
+
+        assigned_authorization = get_assigned_authorization_for_user(
+            get_authenticated_user(), assigned_authorization_uuid
+        )
+        if not assigned_authorization:
+            raise NotFound()
+
+        assigned_authorization.delete_instance()
         return "", 204
 
 

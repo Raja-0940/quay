@@ -4,10 +4,14 @@ import {
   ActionGroup,
   Button,
   FormGroup,
+  FormHelperText,
+  HelperText,
+  HelperTextItem,
   TextInput,
 } from '@patternfly/react-core';
 import {useEffect, useState} from 'react';
 import {useUpdateNotifications} from 'src/hooks/UseUpdateNotifications';
+import {NotificationEventConfig} from 'src/hooks/UseEvents';
 import {ExclamationCircleIcon} from '@patternfly/react-icons';
 
 export default function CreateHipchatNotification(
@@ -30,7 +34,7 @@ export default function CreateHipchatNotification(
         room_id: roomId,
       },
       event: props.event?.type,
-      event_config: {},
+      event_config: props.eventConfig,
       method: props.method?.type,
       title: title,
     });
@@ -46,6 +50,7 @@ export default function CreateHipchatNotification(
     props.event != undefined &&
     token != '' &&
     roomId != '' &&
+    props.isValidateConfig() &&
     isValidRoomId(roomId);
 
   useEffect(() => {
@@ -64,20 +69,23 @@ export default function CreateHipchatNotification(
 
   return (
     <>
-      <FormGroup
-        fieldId="room-id-number"
-        label="Room ID #"
-        isRequired
-        helperTextInvalid="Must be a number"
-        helperTextInvalidIcon={<ExclamationCircleIcon />}
-        validated={roomId == '' || isValidRoomId(roomId) ? 'default' : 'error'}
-      >
+      <FormGroup fieldId="room-id-number" label="Room ID #" isRequired>
         <TextInput
           required
           id="room-id-number-field"
           value={roomId}
-          onChange={(value) => setRoomId(value)}
+          onChange={(_event, value) => setRoomId(value)}
         />
+
+        {!isValidRoomId(roomId) && (
+          <FormHelperText>
+            <HelperText>
+              <HelperTextItem variant="error" icon={<ExclamationCircleIcon />}>
+                Must be a number
+              </HelperTextItem>
+            </HelperText>
+          </FormHelperText>
+        )}
       </FormGroup>
       <FormGroup
         fieldId="room-notification-token"
@@ -88,14 +96,14 @@ export default function CreateHipchatNotification(
           required
           id="room-notification-token-field"
           value={token}
-          onChange={(value) => setToken(value)}
+          onChange={(_event, value) => setToken(value)}
         />
       </FormGroup>
       <FormGroup fieldId="title" label="Title">
         <TextInput
           id="notification-title"
           value={title}
-          onChange={(value) => setTitle(value)}
+          onChange={(_event, value) => setTitle(value)}
         />
       </FormGroup>
       <ActionGroup>
@@ -116,6 +124,8 @@ interface CreateHipchatNotification {
   repo: string;
   event: NotificationEvent;
   method: NotificationMethod;
+  eventConfig: NotificationEventConfig;
+  isValidateConfig: () => boolean;
   closeDrawer: () => void;
   setError: (error: string) => void;
 }

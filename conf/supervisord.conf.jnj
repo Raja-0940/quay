@@ -320,6 +320,18 @@ autostart = {{ config['manifestbackfillworker']['autostart'] }}
 stdout_events_enabled = true
 stderr_events_enabled = true
 
+[program:manifestsubjectbackfillworker]
+environment=
+  PYTHONPATH=%(ENV_QUAYDIR)s
+command={% if hotreload -%}
+  gunicorn --timeout=600 -b 'unix:/tmp/manifestsubjectbackfillworker.sock' -c %(ENV_QUAYCONF)s/gunicorn_worker.py 'workers.manifestsubjectbackfillworker:create_gunicorn_worker()'
+{% else -%}
+  python -m workers.manifestsubjectbackfillworker
+{% endif -%}
+autostart = {{ config['manifestsubjectbackfillworker']['autostart'] }}
+stdout_events_enabled = true
+stderr_events_enabled = true
+
 [program:securityscanningnotificationworker]
 environment=
   PYTHONPATH=%(ENV_QUAYDIR)s
@@ -365,6 +377,18 @@ command={% if hotreload -%}
   python -m workers.quotaregistrysizeworker
 {% endif -%}
 autostart = {{ config['quotaregistrysizeworker']['autostart'] }}
+stdout_events_enabled = true
+stderr_events_enabled = true
+
+[program:autopruneworker]
+environment=
+  PYTHONPATH=%(ENV_QUAYDIR)s
+command={% if hotreload -%}
+  gunicorn --timeout=600 -b 'unix:/tmp/autopruneworker.sock' -c %(ENV_QUAYCONF)s/gunicorn_worker.py 'workers.autopruneworker:create_gunicorn_worker()'
+{% else -%}
+  python -m workers.autopruneworker
+{% endif -%}
+autostart = {{ config['autopruneworker']['autostart'] }}
 stdout_events_enabled = true
 stderr_events_enabled = true
 

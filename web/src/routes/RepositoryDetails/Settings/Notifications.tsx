@@ -9,7 +9,7 @@ import {
 import {BellIcon} from '@patternfly/react-icons';
 import {
   ExpandableRowContent,
-  TableComposable,
+  Table,
   Tbody,
   Td,
   Th,
@@ -104,7 +104,7 @@ export default function Notifications({
               props.setDrawerContent(DrawerContentType.CreateNotification)
             }
           >
-            Create Notification
+            Create notification
           </Button>
         }
       />
@@ -130,7 +130,7 @@ export default function Notifications({
         setFilter={setFilter}
         resetFilter={resetFilter}
       />
-      <TableComposable aria-label="Repository notifications table">
+      <Table aria-label="Repository notifications table" variant="compact">
         <Thead>
           <Tr>
             <Th />
@@ -198,7 +198,7 @@ export default function Notifications({
             </Tr>
           </Tbody>
         ))}
-      </TableComposable>
+      </Table>
     </>
   );
 }

@@ -1,11 +1,4 @@
-import {
-  TableComposable,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-} from '@patternfly/react-table';
+import {Table, Tbody, Td, Th, Thead, Tr} from '@patternfly/react-table';
 import {
   PageSection,
   PanelFooter,
@@ -37,7 +30,7 @@ type TableModeType = 'All' | 'Selected';
 export default function TeamView(props: TeamViewProps) {
   const [tableMode, setTableMode] = useState<TableModeType>('All');
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [tableItems, setTableItems] = useState([]);
   const [search, setSearch] = useRecoilState(searchTeamState);
   const [searchInputText, setSearchInputText] = useState('Search, create team');
@@ -66,10 +59,7 @@ export default function TeamView(props: TeamViewProps) {
     page * perPage - perPage + perPage,
   );
 
-  const onTableModeChange: ToggleGroupItemProps['onChange'] = (
-    _isSelected,
-    event,
-  ) => {
+  const onTableModeChange: ToggleGroupItemProps['onChange'] = (event) => {
     const id = event.currentTarget.id;
     setTableMode(id as TableModeType);
   };
@@ -91,7 +81,7 @@ export default function TeamView(props: TeamViewProps) {
   };
 
   return (
-    <PageSection>
+    <PageSection {...(props.isWizardStep && {padding: {default: 'noPadding'}})}>
       <Toolbar>
         <ToolbarContent>
           {props.showCheckbox ? (
@@ -146,7 +136,7 @@ export default function TeamView(props: TeamViewProps) {
           />
         </ToolbarContent>
       </Toolbar>
-      <TableComposable aria-label="Selectable table">
+      <Table aria-label="Selectable table" variant="compact">
         <Thead>
           <Tr>
             {props.showCheckbox ? <Th /> : null}
@@ -168,6 +158,7 @@ export default function TeamView(props: TeamViewProps) {
                         onSelectItem(team, rowIndex, isSelecting),
                       isSelected: isItemSelected(team),
                     }}
+                    data-testid={`checkbox-row-${team.name}`}
                   />
                 ) : null}
                 <Td dataLabel={ColumnNames.name}>{team.name}</Td>
@@ -184,7 +175,7 @@ export default function TeamView(props: TeamViewProps) {
             </Tbody>
           );
         })}
-      </TableComposable>
+      </Table>
       <PanelFooter>
         <ToolbarPagination
           itemsList={filteredItems}
@@ -209,4 +200,5 @@ interface TeamViewProps {
   showToggleGroup: boolean;
   searchInputText?: string;
   filterWithDropdown: boolean;
+  isWizardStep?: boolean;
 }

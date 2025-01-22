@@ -59,8 +59,8 @@ const response = {
     RECAPTCHA_SITE_KEY: null,
     REGISTRY_TITLE: 'Mock Quay',
     REGISTRY_TITLE_SHORT: 'Quay',
-    SEARCH_MAX_RESULT_PAGE_COUNT: 10,
-    SEARCH_RESULTS_PER_PAGE: 10,
+    SEARCH_MAX_RESULT_PAGE_COUNT: 20,
+    SEARCH_RESULTS_PER_PAGE: 20,
     SENTRY_PUBLIC_DSN: null,
     SERVER_HOSTNAME: 'quay-ui.quaydev.org',
     SETUP_COMPLETE: true,
@@ -69,6 +69,8 @@ const response = {
   },
   external_login: [],
   features: {
+    REFERRERS_API: false,
+    MANIFEST_SUBJECT_BACKFILL: false,
     SUPERUSERS_FULL_ACCESS: true,
     ACTION_LOG_ROTATION: false,
     ADVERTISE_V2: true,
@@ -130,6 +132,7 @@ const response = {
     USER_LOG_ACCESS: false,
     USER_METADATA: false,
     USER_RENAME: false,
+    IMAGE_EXPIRY_TRIGGER: true,
   },
   oauth: {
     GITHUB_TRIGGER_CONFIG: {

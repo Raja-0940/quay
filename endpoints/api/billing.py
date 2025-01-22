@@ -3,6 +3,7 @@ Billing information, subscriptions, and plan information.
 """
 import datetime
 import json
+import time
 import uuid
 
 import stripe
@@ -53,16 +54,29 @@ def check_internal_api_for_subscription(namespace_user):
         query = organization_skus.get_org_subscriptions(namespace_user.id)
         org_subscriptions = list(query.dicts()) if query is not None else []
         for subscription in org_subscriptions:
+            quantity = 1 if subscription.get("quantity") is None else subscription["quantity"]
             subscription_id = subscription["subscription_id"]
-            sku = marketplace_subscriptions.get_subscription_sku(subscription_id)
-            plans.append(get_plan_using_rh_sku(sku))
+            subscription_details = marketplace_subscriptions.get_subscription_details(
+                subscription_id
+            )
+            sku = subscription_details["sku"]
+            expiration = subscription_details["expiration_date"]
+            terminated = subscription_details["terminated_date"]
+            now_ms = time.time() * 1000
+            if expiration < now_ms or (terminated is not None and terminated < now_ms):
+                organization_skus.remove_subscription_from_org(namespace_user.id, subscription_id)
+                continue
+            for x in range(quantity):
+                plans.append(get_plan_using_rh_sku(sku))
         pass
     else:
-        user_account_number = marketplace_users.get_account_number(namespace_user)
-        if user_account_number:
-            plans = marketplace_subscriptions.get_list_of_subscriptions(
-                user_account_number, filter_out_org_bindings=True, convert_to_stripe_plans=True
-            )
+        user_account_numbers = marketplace_users.get_account_number(namespace_user)
+        if user_account_numbers:
+            plans = []
+            for user_account_number in user_account_numbers:
+                plans += marketplace_subscriptions.get_list_of_subscriptions(
+                    user_account_number, filter_out_org_bindings=True, convert_to_stripe_plans=True
+                )
     return plans
 
 
@@ -641,6 +655,7 @@ class OrganizationPlan(ApiResource):
                             "performer": get_authenticated_user().username,
                             "ip": get_request_ip(),
                             "plan": price["stripeId"],
+                            "trial_period_days": price["free_trial_days"],
                         },
                     },
                     mode="subscription",
@@ -954,9 +969,23 @@ class OrganizationRhSku(ApiResource):
             if query:
                 subscriptions = list(query.dicts())
                 for subscription in subscriptions:
-                    subscription["sku"] = marketplace_subscriptions.get_subscription_sku(
+                    subscription_details = marketplace_subscriptions.get_subscription_details(
                         subscription["subscription_id"]
                     )
+                    now_ms = time.time() * 1000
+                    expired_at = subscription_details["expiration_date"]
+                    terminated_at = subscription_details["terminated_date"]
+                    if expired_at < now_ms or (
+                        terminated_at is not None and terminated_at < now_ms
+                    ):
+                        model.organization_skus.remove_subscription_from_org(
+                            organization.id, subscription["subscription_id"]
+                        )
+                        continue
+                    subscription["sku"] = subscription_details["sku"]
+                    subscription["metadata"] = get_plan_using_rh_sku(subscription_details["sku"])
+                    if subscription.get("quantity") is None:
+                        subscription["quantity"] = 1
                 return subscriptions
             else:
                 return []
@@ -970,35 +999,93 @@ class OrganizationRhSku(ApiResource):
         """
         permission = AdministerOrganizationPermission(orgname)
         request_data = request.get_json()
-        subscription_id = request_data["subscription_id"]
+        organization = model.organization.get_organization(orgname)
+        subscriptions = request_data["subscriptions"]
         if permission.can():
-            organization = model.organization.get_organization(orgname)
-            user = get_authenticated_user()
-            account_number = marketplace_users.get_account_number(user)
-            subscriptions = marketplace_subscriptions.get_list_of_subscriptions(account_number)
-
-            if subscriptions is None:
-                abort(401, message="no valid subscriptions present")
-
-            user_subscription_ids = [int(subscription["id"]) for subscription in subscriptions]
-            if int(subscription_id) in user_subscription_ids:
-                try:
-                    model.organization_skus.bind_subscription_to_org(
-                        user_id=user.id, subscription_id=subscription_id, org_id=organization.id
+            for subscription in subscriptions:
+                subscription_id = subscription.get("subscription_id")
+                if subscription_id is None:
+                    break
+                user = get_authenticated_user()
+                account_numbers = marketplace_users.get_account_number(user)
+                user_available_subscriptions = []
+                for account_number in account_numbers:
+                    user_available_subscriptions += (
+                        marketplace_subscriptions.get_list_of_subscriptions(
+                            account_number, filter_out_org_bindings=True
+                        )
                     )
-                    return "Okay", 201
-                except model.OrgSubscriptionBindingAlreadyExists:
-                    abort(400, message="subscription is already bound to an org")
-            else:
-                abort(401, message=f"subscription does not belong to {user.username}")
 
+                if subscriptions is None:
+                    abort(401, message="no valid subscriptions present")
+
+                user_subs = {sub["id"]: sub for sub in user_available_subscriptions}
+                if int(subscription_id) in user_subs.keys():
+                    # Check if the sku is being split
+                    quantity = subscription.get("quantity")
+                    base_quantity = user_subs.get(subscription_id).get("quantity", 1)
+                    sku = user_subs.get(subscription_id).get("sku")
+
+                    if quantity is not None:
+                        if sku != "MW02702" and quantity != base_quantity:
+                            abort(403, message="cannot split a non-MW02702 sku")
+                        if quantity > base_quantity:
+                            abort(400, message="quantity cannot exceed available amount")
+                    else:
+                        quantity = base_quantity
+
+                    try:
+                        model.organization_skus.bind_subscription_to_org(
+                            user_id=user.id,
+                            subscription_id=subscription_id,
+                            org_id=organization.id,
+                            quantity=quantity,
+                        )
+                    except model.OrgSubscriptionBindingAlreadyExists:
+                        abort(400, message="subscription is already bound to an org")
+                else:
+                    abort(
+                        401,
+                        message=f"subscription {subscription_id} does not belong to {user.username}",
+                    )
+
+            return "Okay", 201
+
+        abort(401)
+
+
+@resource("/v1/organization/<orgname>/marketplace/batchremove")
+@path_param("orgname", "The name of the organization")
+@show_if(features.BILLING)
+class OrganizationRhSkuBatchRemoval(ApiResource):
+    @require_scope(scopes.ORG_ADMIN)
+    @nickname("batchRemoveSku")
+    def post(self, orgname):
+        """
+        Batch remove skus from org
+        """
+        permission = AdministerOrganizationPermission(orgname)
+        request_data = request.get_json()
+        subscriptions = request_data["subscriptions"]
+        if permission.can():
+            try:
+                organization = model.organization.get_organization(orgname)
+            except InvalidOrganizationException:
+                return ("Organization not valid", 400)
+            for subscription in subscriptions:
+                subscription_id = int(subscription.get("subscription_id"))
+                if subscription_id is None:
+                    break
+                model.organization_skus.remove_subscription_from_org(
+                    organization.id, subscription_id
+                )
+            return ("Deleted", 204)
         abort(401)
 
 
 @resource("/v1/organization/<orgname>/marketplace/<subscription_id>")
 @path_param("orgname", "The name of the organization")
 @path_param("subscription_id", "Marketplace subscription id")
-@related_user_resource(UserPlan)
 @show_if(features.BILLING)
 class OrganizationRhSkuSubscriptionField(ApiResource):
     """
@@ -1006,6 +1093,7 @@ class OrganizationRhSkuSubscriptionField(ApiResource):
     """
 
     @require_scope(scopes.ORG_ADMIN)
+    @nickname("removeSkuFromOrg")
     def delete(self, orgname, subscription_id):
         """
         Remove sku from an org
@@ -1037,20 +1125,55 @@ class UserSkuList(ApiResource):
         List the invoices for the current user.
         """
         user = get_authenticated_user()
-        account_number = marketplace_users.get_account_number(user)
-        if not account_number:
+        account_numbers = marketplace_users.get_account_number(user)
+        if not account_numbers:
             raise NotFound()
 
-        user_subscriptions = marketplace_subscriptions.get_list_of_subscriptions(account_number)
-
-        for subscription in user_subscriptions:
-            bound_to_org, organization = organization_skus.subscription_bound_to_org(
-                subscription["id"]
+        user_subscriptions = []
+        for account_number in account_numbers:
+            user_subscriptions += marketplace_subscriptions.get_list_of_subscriptions(
+                account_number
             )
+
+        child_subscriptions = []
+        for subscription in user_subscriptions:
+            bound_to_org, bindings = organization_skus.subscription_bound_to_org(subscription["id"])
             # fill in information for whether a subscription is bound to an org
+            metadata = get_plan_using_rh_sku(subscription["sku"])
             if bound_to_org:
-                subscription["assigned_to_org"] = organization.username
+                # special case for MW02702, which can be split across orgs
+                if subscription["sku"] == "MW02702":
+                    number_of_bindings = 0
+                    for binding in bindings:
+                        # for each bound org, create a new subscription to add to
+                        # the response body
+                        child_subscription = subscription.copy()
+                        child_subscription["quantity"] = binding["quantity"]
+                        child_subscription[
+                            "assigned_to_org"
+                        ] = model.organization.get_organization_by_id(binding["org_id"]).username
+                        child_subscription["metadata"] = metadata
+                        child_subscriptions.append(child_subscription)
+
+                        number_of_bindings += binding["quantity"]
+
+                    remaining_unbound = subscription["quantity"] - number_of_bindings
+                    if remaining_unbound > 0:
+                        subscription["quantity"] = remaining_unbound
+                        subscription["assigned_to_org"] = None
+                    else:
+                        # all quantities for this subscription are bound, remove it from
+                        # the response body
+                        user_subscriptions.remove(subscription)
+
+                else:
+                    # default case, only one org is bound
+                    subscription["assigned_to_org"] = model.organization.get_organization_by_id(
+                        bindings[0]["org_id"]
+                    ).username
             else:
                 subscription["assigned_to_org"] = None
 
-        return user_subscriptions
+            subscription["metadata"] = metadata
+
+        return user_subscriptions + child_subscriptions

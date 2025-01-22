@@ -8,7 +8,6 @@ import time
 import unittest
 from calendar import timegm
 from contextlib import contextmanager
-from test.helpers import assert_action_logged, check_transitive_modifications
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from cryptography.hazmat.backends import default_backend
@@ -26,11 +25,14 @@ from app import (
     notification_queue,
     storage,
 )
+from auth.scopes import READ_REPO, get_scope_information
 from buildtrigger.basehandler import BuildTriggerHandler
 from data import database, model
 from data.database import Repository as RepositoryTable
 from data.database import RepositoryActionCount
 from data.logs_model import logs_model
+from data.model.organization import create_organization
+from data.model.user import get_user
 from data.registry_model import registry_model
 from endpoints.api import api, api_bp
 from endpoints.api.billing import (
@@ -38,9 +40,12 @@ from endpoints.api.billing import (
     OrganizationCard,
     OrganizationPlan,
     OrganizationRhSku,
+    OrganizationRhSkuBatchRemoval,
     OrganizationRhSkuSubscriptionField,
     UserCard,
     UserPlan,
+    UserSkuList,
+    check_internal_api_for_subscription,
 )
 from endpoints.api.build import (
     RepositoryBuildList,
@@ -136,6 +141,8 @@ from endpoints.api.user import (
     StarredRepository,
     StarredRepositoryList,
     User,
+    UserAssignedAuthorization,
+    UserAssignedAuthorizations,
     UserAuthorization,
     UserAuthorizationList,
     UserNotification,
@@ -144,6 +151,7 @@ from endpoints.api.user import (
 from endpoints.building import PreparedBuild
 from endpoints.webhooks import webhooks
 from initdb import finished_database_for_testing, setup_database_for_testing
+from test.helpers import assert_action_logged, check_transitive_modifications
 from util.morecollections import AttrDict
 from util.secscan.v4.fake import fake_security_scanner
 
@@ -175,6 +183,9 @@ ADMIN_ACCESS_EMAIL = "jschorr@devtable.com"
 ORG_REPO = "orgrepo"
 
 ORGANIZATION = "buynlarge"
+
+SUBSCRIPTION_USER = "subscription"
+SUBSCRIPTION_ORG = "subscriptionsorg"
 
 NEW_USER_DETAILS = {
     "username": "bobby",
@@ -459,7 +470,7 @@ class TestUserStarredRepositoryList(ApiTestCase):
         self.login(READ_ACCESS_USER)
 
         # Queries: Base + the list query
-        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 1):
+        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT):
             self.getJsonResponse(StarredRepositoryList, expected_code=200)
 
     def test_star_repo_guest(self):
@@ -476,7 +487,7 @@ class TestUserStarredRepositoryList(ApiTestCase):
         self.login(READ_ACCESS_USER)
 
         # Queries: Base + the list query
-        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 1):
+        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT):
             json = self.getJsonResponse(StarredRepositoryList)
             assert json["repositories"] == []
 
@@ -964,11 +975,11 @@ class TestDeleteNamespace(ApiTestCase):
     def test_deletenamespaces(self):
         self.login(ADMIN_ACCESS_USER)
 
-        # Try to first delete the user. Since they are the sole admin of three orgs, it should fail.
+        # Try to first delete the user. Since they are the sole admin of five orgs, it should fail.
         with check_transitive_modifications():
             self.deleteResponse(User, expected_code=400)
 
-        # Delete the three orgs, checking in between.
+        # Delete the five orgs, checking in between.
         with check_transitive_modifications():
             self.deleteEmptyResponse(
                 Organization, params=dict(orgname=ORGANIZATION), expected_code=204
@@ -979,8 +990,13 @@ class TestDeleteNamespace(ApiTestCase):
             )
             self.deleteResponse(User, expected_code=400)  # Should still fail.
             self.deleteEmptyResponse(Organization, params=dict(orgname="titi"), expected_code=204)
+            self.deleteResponse(User, expected_code=400)  # Should still fail.
             self.deleteEmptyResponse(
                 Organization, params=dict(orgname="proxyorg"), expected_code=204
+            )
+            self.deleteResponse(User, expected_code=400)  # Should still fail.
+            self.deleteEmptyResponse(
+                Organization, params=dict(orgname="testorgforautoprune"), expected_code=204
             )
 
         # Add some queue items for the user.
@@ -2188,7 +2204,7 @@ class TestListRepos(ApiTestCase):
         # Queries: Base + the list query + the popularity and last modified queries + full perms load
         # TODO: Add quota queries
         with patch("features.QUOTA_MANAGEMENT", False):
-            with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 5):
+            with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 4):
                 json = self.getJsonResponse(
                     RepositoryList,
                     params=dict(
@@ -2311,6 +2327,27 @@ class TestListRepos(ApiTestCase):
         # Verify that the public user cannot see the repository.
         self.login(PUBLIC_USER)
         self.assertRepositoryNotVisible("neworg", "somerepo")
+
+    def test_list_repos_globalreadonlysuperuser(self):
+        repository = model.repository.get_repository("orgwithnosuperuser", "repo")
+        assert repository is not None
+        assert repository.visibility.name == "private"
+        self.login("globalreadonlysuperuser")
+        json = self.getJsonResponse(
+            RepositoryList,
+            params=dict(namespace="orgwithnosuperuser", public=False),
+        )
+
+        assert len(json["repositories"]) == 1
+        assert json["repositories"][0]["name"] == "repo"
+
+        # Make sure a normal user can't see the repository
+        self.login(NO_ACCESS_USER)
+        json = self.getJsonResponse(
+            RepositoryList,
+            params=dict(namespace="orgwithnosuperuser", public=False),
+        )
+        assert len(json["repositories"]) == 0
 
 
 class TestViewPublicRepository(ApiTestCase):
@@ -2553,11 +2590,11 @@ class TestGetRepository(ApiTestCase):
         self.login(ADMIN_ACCESS_USER)
 
         # base + repo + is_starred + tags
-        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 4):
+        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 3):
             self.getJsonResponse(Repository, params=dict(repository=ADMIN_ACCESS_USER + "/simple"))
 
         # base + repo + is_starred + tags
-        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 4):
+        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 3):
             json = self.getJsonResponse(
                 Repository, params=dict(repository=ADMIN_ACCESS_USER + "/gargantuan")
             )
@@ -2799,7 +2836,7 @@ class TestRepoBuilds(ApiTestCase):
         self.login(ADMIN_ACCESS_USER)
 
         # Queries: Permission + the list query + app check
-        with assert_query_count(3):
+        with assert_query_count(2):
             json = self.getJsonResponse(
                 RepositoryBuildList, params=dict(repository=ADMIN_ACCESS_USER + "/simple")
             )
@@ -2810,7 +2847,7 @@ class TestRepoBuilds(ApiTestCase):
         self.login(ADMIN_ACCESS_USER)
 
         # Queries: Permission + the list query + app check
-        with assert_query_count(3):
+        with assert_query_count(2):
             json = self.getJsonResponse(
                 RepositoryBuildList, params=dict(repository=ADMIN_ACCESS_USER + "/building")
             )
@@ -3687,11 +3724,11 @@ class TestUserRobots(ApiTestCase):
         self.putJsonResponse(UserRobot, params=dict(robot_shortname="coolbot"), expected_code=201)
 
         # Queries: Base + the lookup query
-        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 1):
+        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT):
             self.getJsonResponse(UserRobotList)
 
         # Queries: Base + the lookup query
-        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT + 1):
+        with assert_query_count(BASE_LOGGEDIN_QUERY_COUNT):
             self.getJsonResponse(UserRobotList, params=dict(permissions=True))
 
     def test_robots(self):
@@ -3902,6 +3939,12 @@ class TestOrgRobots(ApiTestCase):
         )
 
         self.assertEqual(json["token"], json2["token"])
+
+    def test_get_robots_as_globalreadonlysuperuser(self):
+        self.login("globalreadonlysuperuser")
+        params = dict(orgname=ORGANIZATION)
+        for r in self.getJsonResponse(OrgRobotList, params=params)["robots"]:
+            assert "token" in r
 
 
 class TestLogs(ApiTestCase):
@@ -4588,6 +4631,81 @@ class TestUserAuthorizations(ApiTestCase):
         )
 
 
+class TestUserAssignedAuthorizations(ApiTestCase):
+    def test_list_authorizations(self):
+        assigned_scope = READ_REPO.scope
+        self.login(PUBLIC_USER)
+        admin = get_user(ADMIN_ACCESS_USER)
+        assigned_user = get_user(PUBLIC_USER)
+        org = create_organization("neworg", "neworg@devtable.com", admin)
+        app = model.oauth.create_application(org, "test", "http://foo/bar", "http://foo/bar/baz")
+        assigned_authorization = model.oauth.assign_token_to_user(
+            app, assigned_user, app.redirect_uri, assigned_scope, "token"
+        )
+
+        response = self.getJsonResponse(
+            UserAssignedAuthorizations,
+            expected_code=200,
+        )
+        assert len(response["authorizations"]) == 1
+        authorization = response["authorizations"][0]
+        del authorization["application"]["avatar"]
+        del authorization["application"]["organization"]["avatar"]
+        assert authorization == {
+            "application": {
+                "name": app.name,
+                "clientId": app.client_id,
+                "description": app.description,
+                "url": app.application_uri,
+                "organization": {
+                    "name": org.username,
+                },
+            },
+            "uuid": assigned_authorization.uuid,
+            "redirectUri": assigned_authorization.redirect_uri,
+            "scopes": get_scope_information(assigned_scope),
+            "responseType": assigned_authorization.response_type,
+        }
+
+
+class TestUserAssignedAuthorization(ApiTestCase):
+    def test_delete_assigned_authorization(self):
+        assigned_scope = READ_REPO.scope
+        self.login(PUBLIC_USER)
+        admin = get_user(ADMIN_ACCESS_USER)
+        assigned_user = get_user(PUBLIC_USER)
+        org = create_organization("neworg", "neworg@devtable.com", admin)
+        app = model.oauth.create_application(org, "test", "http://foo/bar", "http://foo/bar/baz")
+        assigned_authorization = model.oauth.assign_token_to_user(
+            app, assigned_user, app.redirect_uri, assigned_scope, "token"
+        )
+
+        response = self.getJsonResponse(
+            UserAssignedAuthorizations,
+            expected_code=200,
+        )
+        assert len(response["authorizations"]) == 1
+
+        self.deleteEmptyResponse(
+            UserAssignedAuthorization,
+            params=dict(assigned_authorization_uuid=assigned_authorization.uuid),
+        )
+
+        response = self.getJsonResponse(
+            UserAssignedAuthorizations,
+            expected_code=200,
+        )
+        assert len(response["authorizations"]) == 0
+
+    def test_delete_assigned_authorization_not_found(self):
+        self.login(PUBLIC_USER)
+        self.deleteResponse(
+            UserAssignedAuthorization,
+            params=dict(assigned_authorization_uuid="doesnotexist"),
+            expected_code=404,
+        )
+
+
 class TestSuperUserLogs(ApiTestCase):
     def test_get_logs(self):
         self.login(ADMIN_ACCESS_USER)
@@ -5067,61 +5185,195 @@ class TestSuperUserManagement(ApiTestCase):
         self.assertEqual(len(json["messages"]), 1)
 
 
+class TestUserSku(ApiTestCase):
+    def test_get_user_skus(self):
+        self.login(SUBSCRIPTION_USER)
+        json = self.getJsonResponse(UserSkuList)
+        self.assertEqual(len(json), 3)
+
+    def test_quantity(self):
+        self.login(SUBSCRIPTION_USER)
+        subscription_user = model.user.get_user(SUBSCRIPTION_USER)
+        plans = check_internal_api_for_subscription(subscription_user)
+        assert len(plans) == 13
+
+    def test_split_sku(self):
+        self.login(SUBSCRIPTION_USER)
+        user = model.user.get_user(SUBSCRIPTION_USER)
+        org = model.organization.get_organization(SUBSCRIPTION_ORG)
+        model.organization_skus.bind_subscription_to_org(80808080, org.id, user.id, 3)
+
+        user_subs = self.getJsonResponse(resource_name=UserSkuList)
+
+        unassigned_sub = None
+        assigned_sub = None
+        for sub in user_subs:
+            if sub["id"] == 80808080 and sub["assigned_to_org"] is None:
+                unassigned_sub = sub
+            elif sub["id"] == 80808080 and sub["assigned_to_org"] is not None:
+                assigned_sub = sub
+        self.assertIsNotNone(unassigned_sub, "Could not find unassigned remaining subscription")
+        self.assertIsNotNone(assigned_sub, "Could not find assigned subscription")
+        self.assertEqual(7, unassigned_sub["quantity"])
+
+
 class TestOrganizationRhSku(ApiTestCase):
     def test_bind_sku_to_org(self):
-        self.login(ADMIN_ACCESS_USER)
+        self.login(SUBSCRIPTION_USER)
         self.postResponse(
             resource_name=OrganizationRhSku,
-            params=dict(orgname=ORGANIZATION),
-            data={"subscription_id": 12345},
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 12345678, "quantity": 2}]},
             expected_code=201,
         )
         json = self.getJsonResponse(
             resource_name=OrganizationRhSku,
-            params=dict(orgname=ORGANIZATION),
+            params=dict(orgname=SUBSCRIPTION_ORG),
         )
         self.assertEqual(len(json), 1)
 
     def test_bind_sku_duplicate(self):
-        user = model.user.get_user(ADMIN_ACCESS_USER)
-        org = model.organization.get_organization(ORGANIZATION)
-        model.organization_skus.bind_subscription_to_org(12345, org.id, user.id)
-        self.login(ADMIN_ACCESS_USER)
+        user = model.user.get_user(SUBSCRIPTION_USER)
+        org = model.organization.get_organization(SUBSCRIPTION_ORG)
+        model.organization_skus.bind_subscription_to_org(12345678, org.id, user.id)
+        self.login(SUBSCRIPTION_USER)
         self.postResponse(
             resource_name=OrganizationRhSku,
-            params=dict(orgname=ORGANIZATION),
-            data={"subscription_id": 12345},
-            expected_code=400,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 12345678}]},
+            expected_code=401,
         )
 
     def test_bind_sku_unauthorized(self):
         # bind a sku that user does not own
-        self.login(ADMIN_ACCESS_USER)
+        self.login(SUBSCRIPTION_USER)
         self.postResponse(
             resource_name=OrganizationRhSku,
-            params=dict(orgname=ORGANIZATION),
-            data={"subscription_id": 11111},
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 11111}]},
             expected_code=401,
         )
 
     def test_remove_sku_from_org(self):
-        self.login(ADMIN_ACCESS_USER)
+        self.login(SUBSCRIPTION_USER)
         self.postResponse(
             resource_name=OrganizationRhSku,
-            params=dict(orgname=ORGANIZATION),
-            data={"subscription_id": 12345},
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 12345678}]},
             expected_code=201,
         )
         self.deleteResponse(
             resource_name=OrganizationRhSkuSubscriptionField,
-            params=dict(orgname=ORGANIZATION, subscription_id=12345),
+            params=dict(orgname=SUBSCRIPTION_ORG, subscription_id=12345678),
             expected_code=204,
         )
         json = self.getJsonResponse(
             resource_name=OrganizationRhSku,
-            params=dict(orgname=ORGANIZATION),
+            params=dict(orgname=SUBSCRIPTION_ORG),
         )
         self.assertEqual(len(json), 0)
+
+    def test_sku_stacking(self):
+        # multiples of same sku
+        self.login(SUBSCRIPTION_USER)
+        self.postResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 12345678}, {"subscription_id": 11223344}]},
+            expected_code=201,
+        )
+        json = self.getJsonResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+        )
+        self.assertEqual(len(json), 2)
+        json = self.getJsonResponse(OrgPrivateRepositories, params=dict(orgname=SUBSCRIPTION_ORG))
+        self.assertEqual(True, json["privateAllowed"])
+
+    def test_batch_sku_remove(self):
+        self.login(SUBSCRIPTION_USER)
+        self.postResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 12345678}, {"subscription_id": 11223344}]},
+            expected_code=201,
+        )
+        self.postResponse(
+            resource_name=OrganizationRhSkuBatchRemoval,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 12345678}, {"subscription_id": 11223344}]},
+            expected_code=204,
+        )
+        json = self.getJsonResponse(
+            resource_name=OrganizationRhSku, params=dict(orgname=SUBSCRIPTION_ORG)
+        )
+        self.assertEqual(len(json), 0)
+
+    def test_none_quantity(self):
+        self.login(SUBSCRIPTION_USER)
+        user = model.user.get_user(SUBSCRIPTION_USER)
+        org = model.organization.get_organization(SUBSCRIPTION_ORG)
+        model.organization_skus.bind_subscription_to_org(12345678, org.id, user.id, None)
+        json = self.getJsonResponse(
+            resource_name=OrganizationRhSku, params=dict(orgname=SUBSCRIPTION_ORG)
+        )
+        self.assertEqual(json[0]["quantity"], 1)
+
+        plans = check_internal_api_for_subscription(org)
+        assert len(plans) == 1
+
+    def test_expired_attachment(self):
+        self.login(SUBSCRIPTION_USER)
+        user = model.user.get_user(SUBSCRIPTION_USER)
+        org = model.organization.get_organization(SUBSCRIPTION_ORG)
+        model.organization_skus.bind_subscription_to_org(80808080, org.id, user.id, 1)
+        json = self.getJsonResponse(OrgPrivateRepositories, params=dict(orgname=SUBSCRIPTION_ORG))
+        self.assertEqual(json["privateAllowed"], False)
+
+    def test_reconciled_attachment(self):
+        self.login(SUBSCRIPTION_USER)
+        self.postResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 87654321, "quantity": 1}]},
+            expected_code=401,
+        )
+        json = self.getJsonResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+        )
+        self.assertEqual(len(json), 0)
+
+    def test_terminated_attachment(self):
+        self.login(SUBSCRIPTION_USER)
+        user = model.user.get_user(SUBSCRIPTION_USER)
+        org = model.organization.get_organization(SUBSCRIPTION_ORG)
+        model.organization_skus.bind_subscription_to_org(22222222, org.id, user.id, 1)
+        json = self.getJsonResponse(OrgPrivateRepositories, params=dict(orgname=SUBSCRIPTION_ORG))
+        self.assertEqual(json["privateAllowed"], False)
+
+    def test_splittable_sku(self):
+        self.login(SUBSCRIPTION_USER)
+
+        self.postResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 80808080, "quantity": 3}]},
+            expected_code=201,
+        )
+
+        self.postResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+            data={"subscriptions": [{"subscription_id": 80808080, "quantity": 10}]},
+            expected_code=400,
+        )
+
+        org_subs = self.getJsonResponse(
+            resource_name=OrganizationRhSku,
+            params=dict(orgname=SUBSCRIPTION_ORG),
+        )
+        self.assertEqual(org_subs[0]["quantity"], 3)
 
 
 if __name__ == "__main__":

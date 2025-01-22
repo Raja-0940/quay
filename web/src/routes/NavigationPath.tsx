@@ -3,6 +3,7 @@ import Organization from './OrganizationsList/Organization/Organization';
 import RepositoryDetails from 'src/routes/RepositoryDetails/RepositoryDetails';
 import RepositoriesList from './RepositoriesList/RepositoriesList';
 import TagDetails from 'src/routes/TagDetails/TagDetails';
+import OverviewList from './OverviewList/OverviewList';
 
 const organizationNameBreadcrumb = (match) => {
   return <span>{match.params.organizationName}</span>;
@@ -16,16 +17,22 @@ const tagNameBreadcrumb = (match) => {
   return <span>{match.params.tagName}</span>;
 };
 
+const manifestDigestBreadcrumb = (match) => {
+  return <span>{match.params.manifestDigest}</span>;
+};
+
 const teamMemberBreadcrumb = (match) => {
   return <span>{match.params.teamName}</span>;
 };
 
 const Breadcrumb = {
+  overviewListBreadcrumb: 'Overview',
   organizationsListBreadcrumb: 'Organization',
   repositoriesListBreadcrumb: 'Repository',
   organizationDetailBreadcrumb: organizationNameBreadcrumb,
   repositoryDetailBreadcrumb: repositoryNameBreadcrumb,
   tagDetailBreadcrumb: tagNameBreadcrumb,
+  manifestDigestBreadcrumb: manifestDigestBreadcrumb,
   teamMemberBreadcrumb: teamMemberBreadcrumb,
 };
 
@@ -33,6 +40,8 @@ export enum NavigationPath {
   // Side Nav
   home = '/',
   organizationsList = '/organization',
+
+  overviewList = '/overview',
 
   repositoriesList = '/repository',
 
@@ -45,8 +54,17 @@ export enum NavigationPath {
   // Tag Detail
   tagDetail = '/repository/:organizationName/:repositoryName/tag/:tagName',
 
+  // Manifest Detail
+  manifestDetail = '/repository/:organizationName/:repositoryName/manifest/:manifestDigest',
+
   // Team Member
   teamMember = '/organization/:organizationName/teams/:teamName',
+
+  // Build trigger setup
+  setupBuildTrigger = '/repository/:organizationName/:repositoryName/trigger/:triggerUuid',
+
+  // Build info
+  buildInfo = '/repository/:organizationName/:repositoryName/build/:buildId',
 }
 
 export function getRepoDetailPath(
@@ -97,6 +115,19 @@ export function getTeamMemberPath(
   return domainRoute(currentRoute, teamMemberPath);
 }
 
+export function getBuildInfoPath(
+  currentRoute: string,
+  org: string,
+  repo: string,
+  buildId: string,
+) {
+  let buildInfoPath = NavigationPath.buildInfo.toString();
+  buildInfoPath = buildInfoPath.replace(':organizationName', org);
+  buildInfoPath = buildInfoPath.replace(':repositoryName', repo);
+  buildInfoPath = buildInfoPath.replace(':buildId', buildId);
+  return domainRoute(currentRoute, buildInfoPath);
+}
+
 export function getDomain() {
   return process.env.REACT_APP_QUAY_DOMAIN || 'quay.io';
 }
@@ -110,8 +141,10 @@ function domainRoute(currentRoute, definedRoute) {
    So, the function returns /settings/quay/<route> .
    ***/
   return (
-    currentRoute.replace(/\/(organization|repository|signin)(?!.*\1).*/, '') +
-    definedRoute
+    currentRoute.replace(
+      /\/(overview|organization|repository|signin)(?!.*\1).*/,
+      '',
+    ) + definedRoute
   );
 }
 
@@ -120,29 +153,44 @@ export const getNavigationRoutes = () => {
 
   const NavigationRoutes = [
     {
+      path: domainRoute(currentRoute, NavigationPath.overviewList),
+      element: <OverviewList />,
+      breadcrumb: Breadcrumb.overviewListBreadcrumb,
+    },
+    {
       path: domainRoute(currentRoute, NavigationPath.organizationsList),
-      Component: <OrganizationsList />,
+      element: <OrganizationsList />,
       breadcrumb: Breadcrumb.organizationsListBreadcrumb,
     },
     {
       path: domainRoute(currentRoute, NavigationPath.organizationDetail),
-      Component: <Organization />,
+      element: <Organization />,
       breadcrumb: Breadcrumb.organizationDetailBreadcrumb,
     },
     {
       path: domainRoute(currentRoute, NavigationPath.repositoriesList),
-      Component: <RepositoriesList organizationName={null} />,
+      element: <RepositoriesList organizationName={null} />,
       breadcrumb: Breadcrumb.repositoriesListBreadcrumb,
     },
     {
       path: domainRoute(currentRoute, NavigationPath.repositoryDetail),
-      Component: <RepositoryDetails />,
+      element: <RepositoryDetails />,
       breadcrumb: Breadcrumb.repositoryDetailBreadcrumb,
     },
     {
       path: domainRoute(currentRoute, NavigationPath.tagDetail),
-      Component: <TagDetails />,
+      element: <TagDetails />,
       breadcrumb: Breadcrumb.tagDetailBreadcrumb,
+    },
+    {
+      path: domainRoute(currentRoute, NavigationPath.manifestDetail),
+      element: <TagDetails />,
+      breadcrumb: Breadcrumb.manifestDigestBreadcrumb,
+    },
+    {
+      path: domainRoute(currentRoute, NavigationPath.teamMember),
+      element: <RepositoryDetails />,
+      breadcrumb: Breadcrumb.teamMemberBreadcrumb,
     },
   ];
   return NavigationRoutes;

@@ -4,22 +4,28 @@ from functools import wraps
 from flask import Response, request, url_for
 
 import features
-from app import app, storage
+from app import app, model_cache, storage
 from auth.registry_jwt_auth import process_registry_jwt_auth
 from data.database import db_disallow_replica_use
 from data.model import (
     ManifestDoesNotExist,
+    QuotaExceededException,
     RepositoryDoesNotExist,
     TagDoesNotExist,
     namespacequota,
-    repository,
 )
 from data.model.oci.manifest import CreateManifestException
 from data.model.oci.tag import RetargetTagException
 from data.registry_model import registry_model
 from digest import digest_tools
+from endpoints.api import (
+    log_unauthorized_delete,
+    log_unauthorized_pull,
+    log_unauthorized_push,
+)
 from endpoints.decorators import (
     anon_protect,
+    check_pushes_disabled,
     check_readonly,
     disallow_for_account_recovery_mode,
     inject_registry_model,
@@ -61,13 +67,18 @@ MANIFEST_TAGNAME_ROUTE = BASE_MANIFEST_ROUTE.format(VALID_TAG_PATTERN)
 @disallow_for_account_recovery_mode
 @parse_repository_name()
 @process_registry_jwt_auth(scopes=["pull"])
+@log_unauthorized_pull
 @require_repo_read(allow_for_superuser=True)
 @anon_protect
 @inject_registry_model()
 def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref, registry_model):
     try:
         repository_ref = registry_model.lookup_repository(
-            namespace_name, repo_name, raise_on_error=True, manifest_ref=manifest_ref
+            namespace_name,
+            repo_name,
+            raise_on_error=True,
+            manifest_ref=manifest_ref,
+            model_cache=model_cache,
         )
     except RepositoryDoesNotExist as e:
         image_pulls.labels("v2", "tag", 404).inc()
@@ -130,20 +141,26 @@ def fetch_manifest_by_tagname(namespace_name, repo_name, manifest_ref, registry_
 @disallow_for_account_recovery_mode
 @parse_repository_name()
 @process_registry_jwt_auth(scopes=["pull"])
+@log_unauthorized_pull
 @require_repo_read(allow_for_superuser=True)
 @anon_protect
 @inject_registry_model()
 def fetch_manifest_by_digest(namespace_name, repo_name, manifest_ref, registry_model):
     try:
         repository_ref = registry_model.lookup_repository(
-            namespace_name, repo_name, raise_on_error=True, manifest_ref=manifest_ref
+            namespace_name,
+            repo_name,
+            raise_on_error=True,
+            manifest_ref=manifest_ref,
+            model_cache=model_cache,
         )
     except RepositoryDoesNotExist as e:
         image_pulls.labels("v2", "manifest", 404).inc()
         raise NameUnknown("repository not found")
 
     try:
-        manifest = registry_model.lookup_manifest_by_digest(
+        manifest = registry_model.lookup_cached_manifest_by_digest(
+            model_cache,
             repository_ref,
             manifest_ref,
             raise_on_error=True,
@@ -253,12 +270,24 @@ def _doesnt_accept_schema_v1():
 @parse_repository_name()
 @_reject_manifest2_schema2
 @process_registry_jwt_auth(scopes=["pull", "push"])
+@log_unauthorized_push
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def write_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
     parsed = _parse_manifest(request.content_type, request.data)
     return _write_manifest_and_log(namespace_name, repo_name, manifest_ref, parsed)
+
+
+def _enqueue_blobs_for_replication(manifest, storage, namespace_name):
+    blobs = registry_model.get_manifest_local_blobs(manifest, storage)
+    if blobs is None:
+        logger.error("Could not lookup blobs for manifest `%s`", manifest.digest)
+    else:
+        with queue_replication_batch(namespace_name) as queue_storage_replication:
+            for blob_digest in blobs:
+                queue_storage_replication(blob_digest)
 
 
 @v2_bp.route(MANIFEST_DIGEST_ROUTE, methods=["PUT"])
@@ -266,9 +295,11 @@ def write_manifest_by_tagname(namespace_name, repo_name, manifest_ref):
 @parse_repository_name()
 @_reject_manifest2_schema2
 @process_registry_jwt_auth(scopes=["pull", "push"])
+@log_unauthorized_push
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def write_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     parsed = _parse_manifest(request.content_type, request.data)
     if parsed.digest != manifest_ref:
@@ -282,7 +313,9 @@ def write_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     # manifest does not contain the tag and this call was not given a tag name.
     # Instead, we write the manifest with a temporary tag, as it is being pushed
     # as part of a call for a manifest list.
-    repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
+    repository_ref = registry_model.lookup_repository(
+        namespace_name, repo_name, model_cache=model_cache
+    )
     if repository_ref is None:
         image_pushes.labels("v2", 404, "").inc()
         raise NameUnknown("repository not found")
@@ -300,6 +333,10 @@ def write_manifest_by_digest(namespace_name, repo_name, manifest_ref):
         raise ManifestInvalid()
 
     image_pushes.labels("v2", 201, manifest.media_type).inc()
+
+    # Queue all blob manifests for replication.
+    if features.STORAGE_REPLICATION:
+        _enqueue_blobs_for_replication(manifest, storage, namespace_name)
 
     return Response(
         "OK",
@@ -325,7 +362,6 @@ def _parse_manifest(content_type, request_data):
         return parse_manifest_from_bytes(
             Bytes.for_string_or_unicode(request_data),
             content_type,
-            ignore_unknown_mediatypes=app.config.get("IGNORE_UNKNOWN_MEDIATYPES"),
         )
     except ManifestException as me:
         logger.exception("failed to parse manifest when writing by tagname")
@@ -336,9 +372,11 @@ def _parse_manifest(content_type, request_data):
 @disallow_for_account_recovery_mode
 @parse_repository_name()
 @process_registry_jwt_auth(scopes=["pull", "push"])
+@log_unauthorized_delete
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def delete_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     """
     Delete the manifest specified by the digest.
@@ -347,7 +385,9 @@ def delete_manifest_by_digest(namespace_name, repo_name, manifest_ref):
     forbidden by the spec.
     """
     with db_disallow_replica_use():
-        repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
+        repository_ref = registry_model.lookup_repository(
+            namespace_name, repo_name, model_cache=model_cache
+        )
         if repository_ref is None:
             raise NameUnknown("repository not found")
 
@@ -355,13 +395,45 @@ def delete_manifest_by_digest(namespace_name, repo_name, manifest_ref):
         if manifest is None:
             raise ManifestUnknown()
 
-        tags = registry_model.delete_tags_for_manifest(manifest)
+        tags = registry_model.delete_tags_for_manifest(model_cache, manifest)
         if not tags:
             raise ManifestUnknown()
 
         for tag in tags:
             track_and_log("delete_tag", repository_ref, tag=tag.name, digest=manifest_ref)
 
+        return Response(status=202)
+
+
+@v2_bp.route(MANIFEST_TAGNAME_ROUTE, methods=["DELETE"])
+@disallow_for_account_recovery_mode
+@parse_repository_name()
+@process_registry_jwt_auth(scopes=["pull", "push"])
+@log_unauthorized_delete
+@require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
+@anon_protect
+@check_readonly
+@check_pushes_disabled
+def delete_manifest_by_tag(namespace_name, repo_name, manifest_ref):
+    """
+    Deletes the manifest specified by the tag.
+    """
+    with db_disallow_replica_use():
+        repository_ref = registry_model.lookup_repository(
+            namespace_name, repo_name, model_cache=model_cache
+        )
+        if repository_ref is None:
+            raise NameUnknown("repository not found")
+
+        tag = registry_model.get_repo_tag(repository_ref, manifest_ref)
+        if tag is None:
+            raise ManifestUnknown()
+
+        deleted_tag = registry_model.delete_tag(model_cache, repository_ref, manifest_ref)
+        if not deleted_tag:
+            raise ManifestUnknown()
+
+        track_and_log("delete_tag", repository_ref, tag=deleted_tag.name, digest=manifest_ref)
         return Response(status=202)
 
 
@@ -372,15 +444,9 @@ def _write_manifest_and_log(namespace_name, repo_name, tag_name, manifest_impl):
             namespace_name, repo_name, tag_name, manifest_impl
         )
 
-        # Queue all blob manifests for replication.
+        # Queue all blob manifests for replication
         if features.STORAGE_REPLICATION:
-            blobs = registry_model.get_manifest_local_blobs(manifest, storage)
-            if blobs is None:
-                logger.error("Could not lookup blobs for manifest `%s`", manifest.digest)
-            else:
-                with queue_replication_batch(namespace_name) as queue_storage_replication:
-                    for blob_digest in blobs:
-                        queue_storage_replication(blob_digest)
+            _enqueue_blobs_for_replication(manifest, storage, namespace_name)
 
         track_and_log("push_repo", repository_ref, tag=tag_name)
         spawn_notification(repository_ref, "repo_push", {"updated_tags": [tag_name]})
@@ -404,30 +470,32 @@ def _write_manifest(
     namespace_name, repo_name, tag_name, manifest_impl, registry_model=registry_model
 ):
     # Ensure that the repository exists.
-    repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
+    repository_ref = registry_model.lookup_repository(
+        namespace_name, repo_name, model_cache=model_cache
+    )
     if repository_ref is None:
         raise NameUnknown("repository not found")
 
     # Create the manifest(s) and retarget the tag to point to it.
     try:
         manifest, tag = registry_model.create_manifest_and_retarget_tag(
-            repository_ref, manifest_impl, tag_name, storage, raise_on_error=True
+            repository_ref,
+            manifest_impl,
+            tag_name,
+            storage,
+            raise_on_error=True,
+            verify_quota=app.config.get("FEATURE_QUOTA_MANAGEMENT", False)
+            and app.config.get("FEATURE_VERIFY_QUOTA", True),
         )
     except CreateManifestException as cme:
         raise ManifestInvalid(detail={"message": str(cme)})
     except RetargetTagException as rte:
         raise ManifestInvalid(detail={"message": str(rte)})
+    except QuotaExceededException as qee:
+        raise QuotaExceeded()
 
     if manifest is None:
         raise ManifestInvalid()
-
-    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False):
-        quota = namespacequota.verify_namespace_quota(repository_ref)
-        if quota["severity_level"] == "Warning":
-            namespacequota.notify_organization_admins(repository_ref, "quota_warning")
-        elif quota["severity_level"] == "Reject":
-            namespacequota.notify_organization_admins(repository_ref, "quota_error")
-            raise QuotaExceeded()
 
     return repository_ref, manifest, tag
 

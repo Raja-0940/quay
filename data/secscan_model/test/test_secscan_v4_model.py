@@ -2,7 +2,6 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta
-from test.fixtures import *
 
 import mock
 import pytest
@@ -10,6 +9,8 @@ from peewee import fn
 
 from app import app as application
 from app import instance_keys, storage
+from data.cache import InMemoryDataModelCache, cache_key
+from data.cache.test.test_cache import TEST_CACHE_CONFIG
 from data.database import (
     IndexerVersion,
     IndexStatus,
@@ -21,17 +22,27 @@ from data.database import (
 )
 from data.registry_model import registry_model
 from data.secscan_model.datatypes import (
+    NVD,
+    CVSSv3,
+    Feature,
     Layer,
+    Metadata,
     PaginatedNotificationStatus,
     ScanLookupStatus,
     SecurityInformation,
+    Vulnerability,
+    link_to_cves,
+    vulns_to_base_scores,
+    vulns_to_cves,
 )
 from data.secscan_model.secscan_v4_model import (
     IndexReportState,
+    SecurityInformationLookupResult,
     V4SecurityScanner,
     features_for,
 )
 from image.docker.schema2 import DOCKER_SCHEMA2_MANIFESTLIST_CONTENT_TYPE
+from test.fixtures import *
 from util.secscan.v4.api import APIRequestFailure
 
 
@@ -147,6 +158,53 @@ def test_load_security_information_success(initialized_db, set_secscan_config):
 
     assert result.status == ScanLookupStatus.SUCCESS
     assert result.security_information == SecurityInformation(Layer(manifest.digest, "", "", 4, []))
+
+
+def test_load_security_information_success_with_cache(initialized_db, set_secscan_config):
+    model_cache = InMemoryDataModelCache(TEST_CACHE_CONFIG)
+    model_cache.empty_for_testing()
+
+    repository_ref = registry_model.lookup_repository("devtable", "simple")
+    tag = registry_model.get_repo_tag(repository_ref, "latest")
+    manifest = registry_model.get_manifest_for_tag(tag)
+
+    sec_info_cache_key = cache_key.for_security_report(manifest.digest, {})
+
+    ManifestSecurityStatus.create(
+        manifest=manifest._db_id,
+        repository=repository_ref._db_id,
+        error_json={},
+        index_status=IndexStatus.COMPLETED,
+        indexer_hash="abc",
+        indexer_version=IndexerVersion.V4,
+        metadata_json={},
+    )
+
+    secscan = V4SecurityScanner(application, instance_keys, storage)
+    secscan._secscan_api = mock.Mock()
+    secscan._secscan_api.vulnerability_report.return_value = {
+        "manifest_hash": manifest.digest,
+        "state": "IndexFinished",
+        "packages": {},
+        "distributions": {},
+        "repository": {},
+        "environments": {},
+        "package_vulnerabilities": {},
+        "success": True,
+        "err": "",
+    }
+
+    result = secscan.load_security_information(manifest, model_cache=model_cache)
+
+    assert result.status == ScanLookupStatus.SUCCESS
+    assert result.security_information == SecurityInformation(Layer(manifest.digest, "", "", 4, []))
+
+    # the response should be cached now
+    cache_result_json = model_cache.cache.get(sec_info_cache_key.key)
+    assert cache_result_json is not None
+
+    cache_result = json.loads(cache_result_json)
+    assert cache_result["manifest_hash"] == manifest.digest
 
 
 def test_perform_indexing_whitelist(initialized_db, set_secscan_config):
@@ -502,7 +560,7 @@ def test_features_for():
     expected["Layer"]["Features"].sort(key=lambda d: d["Name"])
     generated = SecurityInformation(
         Layer(
-            "sha256:b05ac1eeec8635442fa5d3e55d6ef4ad287b9c66055a552c2fd309c334563b0a",
+            "sha256:4fd9553ca70c7ed6cbb466573fed2d03b0a8dd2c2eba9febf2ce30f8d537ba17",
             "",
             "",
             4,
@@ -695,3 +753,143 @@ def test_enrichments_in_features_for():
     generated["Layer"]["Features"].sort(key=lambda d: d["Name"])
 
     assert generated == expected
+
+
+@pytest.mark.parametrize(
+    "input_string, expected_output",
+    [
+        (
+            "This is a test string with CVE-2021-1234 and CVE-2022-5678",
+            ["CVE-2021-1234", "CVE-2022-5678"],
+        ),
+        ("No CVEs in this string", []),
+        ("CVE-2023-12345 is the only CVE here", ["CVE-2023-12345"]),
+        ("", []),
+    ],
+)
+def test_link_to_cves(input_string, expected_output):
+    assert link_to_cves(input_string) == expected_output
+
+
+@pytest.mark.parametrize(
+    "vulnerabilities, expected_output",
+    [
+        (
+            [
+                Vulnerability(
+                    Severity="High",
+                    NamespaceName="",
+                    Link="CVE-2021-1234",
+                    FixedBy="",
+                    Description="",
+                    Name="",
+                    Metadata=Metadata(
+                        UpdatedBy="",
+                        RepoName="",
+                        RepoLink="",
+                        DistroName="",
+                        DistroVersion="",
+                        NVD=NVD(CVSSv3=CVSSv3()),
+                    ),
+                ),
+                Vulnerability(
+                    Severity="Medium",
+                    NamespaceName="",
+                    Link="CVE-2022-5678",
+                    FixedBy="",
+                    Description="",
+                    Name="",
+                    Metadata=Metadata(
+                        UpdatedBy="",
+                        RepoName="",
+                        RepoLink="",
+                        DistroName="",
+                        DistroVersion="",
+                        NVD=NVD(CVSSv3=CVSSv3()),
+                    ),
+                ),
+                Vulnerability(
+                    Severity="Low",
+                    NamespaceName="",
+                    Link="Not a CVE link",
+                    FixedBy="",
+                    Description="",
+                    Name="",
+                    Metadata=Metadata(
+                        UpdatedBy="",
+                        RepoName="",
+                        RepoLink="",
+                        DistroName="",
+                        DistroVersion="",
+                        NVD=NVD(CVSSv3=CVSSv3()),
+                    ),
+                ),
+            ],
+            ["CVE-2021-1234", "CVE-2022-5678"],
+        ),
+    ],
+)
+def test_vulns_to_cves(vulnerabilities, expected_output):
+    assert vulns_to_cves(vulnerabilities) == expected_output
+
+
+@pytest.mark.parametrize(
+    "vulnerabilities, expected_output",
+    [
+        (
+            [
+                Vulnerability(
+                    Severity="High",
+                    NamespaceName="",
+                    Link="CVE-2021-1234",
+                    FixedBy="",
+                    Description="",
+                    Name="",
+                    Metadata=Metadata(
+                        UpdatedBy="",
+                        RepoName="",
+                        RepoLink="",
+                        DistroName="",
+                        DistroVersion="",
+                        NVD=NVD(CVSSv3=CVSSv3(Score=7.5)),
+                    ),
+                ),
+                Vulnerability(
+                    Severity="Medium",
+                    NamespaceName="",
+                    Link="CVE-2022-5678",
+                    FixedBy="",
+                    Description="",
+                    Name="",
+                    Metadata=Metadata(
+                        UpdatedBy="",
+                        RepoName="",
+                        RepoLink="",
+                        DistroName="",
+                        DistroVersion="",
+                        NVD=NVD(CVSSv3=CVSSv3(Score=None)),
+                    ),
+                ),
+                Vulnerability(
+                    Severity="Low",
+                    NamespaceName="",
+                    Link="Not a CVE link",
+                    FixedBy="",
+                    Description="",
+                    Name="",
+                    Metadata=Metadata(
+                        UpdatedBy="",
+                        RepoName="",
+                        RepoLink="",
+                        DistroName="",
+                        DistroVersion="",
+                        NVD=NVD(CVSSv3=None),
+                    ),
+                ),
+            ],
+            [7.5],
+        ),
+    ],
+)
+def test_vulns_to_base_scores(vulnerabilities, expected_output):
+    assert vulns_to_base_scores(vulnerabilities) == expected_output

@@ -4,6 +4,9 @@ import {
   AlertActionCloseButton,
   Button,
   FormGroup,
+  FormHelperText,
+  HelperText,
+  HelperTextItem,
   Modal,
   ModalVariant,
   TextInput,
@@ -17,6 +20,7 @@ import {NotificationMethod} from 'src/hooks/UseNotificationMethods';
 import {useUpdateNotifications} from 'src/hooks/UseUpdateNotifications';
 import {isValidEmail} from 'src/libs/utils';
 import {fetchAuthorizedEmail} from 'src/resources/AuthorizedEmailResource';
+import {NotificationEventConfig} from 'src/hooks/UseEvents';
 
 export default function CreateEmailNotification(
   props: CreateEmailNotification,
@@ -48,6 +52,7 @@ export default function CreateEmailNotification(
     props.event != undefined &&
     email != undefined &&
     email != '' &&
+    props.isValidateConfig() &&
     isValidEmail(email);
 
   useEffect(() => {
@@ -65,7 +70,7 @@ export default function CreateEmailNotification(
           email: email,
         },
         event: props.event?.type,
-        event_config: {},
+        event_config: props.eventConfig,
         method: props.method?.type,
         title: title,
       });
@@ -100,7 +105,7 @@ export default function CreateEmailNotification(
           email: email,
         },
         event: props.event?.type,
-        event_config: {},
+        event_config: props.eventConfig,
         method: props.method?.type,
         title: title,
       });
@@ -177,26 +182,29 @@ export default function CreateEmailNotification(
       >
         Unable to verify email confirmation. Please wait a moment and retry.
       </Modal>
-      <FormGroup
-        fieldId="email"
-        label="E-mail address"
-        isRequired
-        validated={email == '' || isValidEmail(email) ? 'default' : 'error'}
-        helperTextInvalid="Invalid email"
-        helperTextInvalidIcon={<ExclamationCircleIcon />}
-      >
+      <FormGroup fieldId="email" label="E-mail address" isRequired>
         <TextInput
           id="notification-email"
           isRequired
           value={email}
-          onChange={(value) => setEmail(value)}
+          onChange={(_event, value) => setEmail(value)}
         />
+
+        {!isValidEmail(email) && (
+          <FormHelperText>
+            <HelperText>
+              <HelperTextItem variant="error" icon={<ExclamationCircleIcon />}>
+                Invalid email
+              </HelperTextItem>
+            </HelperText>
+          </FormHelperText>
+        )}
       </FormGroup>
       <FormGroup fieldId="title" label="Title">
         <TextInput
           id="notification-title"
           value={title}
-          onChange={(value) => setTitle(value)}
+          onChange={(_event, value) => setTitle(value)}
         />
       </FormGroup>
       <ActionGroup>
@@ -217,6 +225,8 @@ interface CreateEmailNotification {
   repo: string;
   event: NotificationEvent;
   method: NotificationMethod;
+  eventConfig: NotificationEventConfig;
+  isValidateConfig: () => boolean;
   closeDrawer: () => void;
   setError: (error: string) => void;
 }

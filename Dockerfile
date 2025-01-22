@@ -9,7 +9,7 @@ ENV PATH=/app/bin/:$PATH \
 ENV PYTHONUSERBASE /app
 ENV TZ UTC
 RUN set -ex\
-	; microdnf -y module enable nginx:1.20 \
+	; microdnf -y module enable nginx:1.22 \
 	; microdnf -y module enable python39:3.9 \
 	; microdnf update -y \
 	; microdnf -y --setopt=tsflags=nodocs install \
@@ -23,8 +23,9 @@ RUN set -ex\
 		python39 \
 		python3-gpg \
 		skopeo \
-        findutils \
-    ; microdnf remove platform-python-pip python39-pip \
+		findutils \
+	; microdnf -y reinstall tzdata \
+	; microdnf remove platform-python-pip python39-pip \
 	; microdnf -y clean all && rm -rf /var/cache/yum
 
 # Config-editor builds the javascript for the configtool.
@@ -34,7 +35,7 @@ COPY --chown=1001:0 config-tool/pkg/lib/editor/ ./
 RUN set -ex\
 	; npm install --quiet --no-progress --ignore-engines \
 	; npm run --quiet build\
-	; rm -Rf node_modules\
+	; rm -Rf .cache .npm* node_modules\
 	;
 
 # Build-python installs the requirements for the python code.
@@ -89,8 +90,6 @@ RUN ARCH=$(uname -m) ; echo $ARCH; \
 
 RUN set -ex\
 	; python3 -m pip install --no-cache-dir --progress-bar off --user $(grep -e '^pip=' -e '^wheel=' -e '^setuptools=' ./requirements.txt) \
-	; python3 -m pip install --no-cache-dir --progress-bar off --user Cython==3.0.0a9 \
-	; python3 -m pip install --no-cache-dir --progress-bar off --user --no-build-isolation PyYAML==5.4.1 \
 	; python3 -m pip install --no-cache-dir --progress-bar off --user --requirement requirements.txt \
 	;
 RUN set -ex\
@@ -147,7 +146,7 @@ COPY --from=build-ui /opt/app-root/dist /quaydir/static/patternfly
 # it except to have it checked in.
 COPY --chown=0:0 . .
 RUN set -ex\
-	; chmod -R g=u .\
+	; chmod -R g=u ./conf\
 	; curl -fsSL https://ip-ranges.amazonaws.com/ip-ranges.json -o util/ipresolver/aws-ip-ranges.json\
 	;
 

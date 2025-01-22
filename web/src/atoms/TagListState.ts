@@ -1,4 +1,4 @@
-import {atom, selector} from 'recoil';
+import {atom, atomFamily, selector} from 'recoil';
 import {SearchState} from 'src/components/toolbar/SearchTypes';
 import {Tag} from 'src/resources/TagResource';
 import ColumnNames from 'src/routes/RepositoryDetails/Tags/ColumnNames';
@@ -8,6 +8,7 @@ export const searchTagsState = atom<SearchState>({
   default: {
     query: '',
     field: ColumnNames.name,
+    isRegEx: false,
   },
 });
 
@@ -20,15 +21,39 @@ export const searchTagsFilterState = selector({
     }
 
     const filterByName = (tag: Tag) => tag.name.includes(search.query);
+    const filterByNameRegex = (tag: Tag) => {
+      try {
+        const regex = new RegExp(search.query, 'i');
+        return regex.test(tag.name);
+      } catch (e) {
+        return false;
+      }
+    };
     const filterByDigest = (tag: Tag) =>
       tag.manifest_digest.includes(search.query);
+    const filterByDigestRegex = (tag: Tag) => {
+      try {
+        const regex = new RegExp(search.query, 'i');
+        return regex.test(tag.manifest_digest);
+      } catch (e) {
+        return false;
+      }
+    };
 
     switch (search.field) {
-      case ColumnNames.manifest:
-        return filterByDigest;
+      case ColumnNames.digest:
+        if (search.isRegEx) {
+          return filterByDigestRegex;
+        } else {
+          return filterByDigest;
+        }
       case ColumnNames.name:
       default:
-        return filterByName;
+        if (search.isRegEx) {
+          return filterByNameRegex;
+        } else {
+          return filterByName;
+        }
     }
   },
 });
@@ -49,4 +74,9 @@ export const selectedTagsState = atom({
 export const currentOpenPopoverState = atom({
   key: 'currentOpenPopoverState',
   default: '',
+});
+
+export const childManifestSizeState = atomFamily({
+  key: 'childManifestDigest',
+  default: null,
 });

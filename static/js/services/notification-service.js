@@ -70,7 +70,7 @@ function($rootScope, $interval, UserService, ApiService, StringBuilderService, P
       'level': 'warning',
       'message': 'We will be down for schedule maintenance from {from_date} to {to_date} ' +
         'for {reason}. We are sorry about any inconvenience.',
-      'page': 'http://status.quay.io/'
+      'page': 'https://status.redhat.com'
     },
     'repo_push': {
       'level': 'info',
@@ -244,7 +244,15 @@ function($rootScope, $interval, UserService, ApiService, StringBuilderService, P
       'page': function(metadata) {
         return '/superuser/?tab=servicekeys';
       },
-    }
+    },
+    'assigned_authorization': {
+      'level': 'primary',
+      'message': 'You have been assigned an Oauth authorization. Please approve or deny the request.',
+      'page': function(metadata) {
+        return '/user/'+metadata["username"]+'/?tab=external';
+      },
+      'dismissable': true
+    },
   };
 
   notificationService.dismissNotification = function(notification) {

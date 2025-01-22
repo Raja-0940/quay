@@ -1,9 +1,3 @@
-# isort: skip_file
-from typing import Dict, Any
-import logging
-import json
-import hashlib
-import random
 import argparse
 import calendar
 import hashlib
@@ -76,6 +70,11 @@ from data.decorators import is_deprecated_model
 from data.encryption import FieldEncrypter
 from data.fields import Credential
 from data.logs_model import logs_model
+from data.model.autoprune import (
+    create_namespace_autoprune_policy,
+    create_repository_autoprune_policy,
+)
+from data.model.oauth import assign_token_to_user
 from data.queue import WorkQueue
 from data.registry_model import registry_model
 from data.registry_model.datatypes import RepositoryReference
@@ -357,13 +356,21 @@ def initialize_database():
     LogEntryKind.create(name="create_robot")
     LogEntryKind.create(name="delete_robot")
 
+    LogEntryKind.create(name="create_robot_federation")
+    LogEntryKind.create(name="delete_robot_federation")
+
+    LogEntryKind.create(name="federated_robot_token_exchange")
+
     LogEntryKind.create(name="create_repo")
     LogEntryKind.create(name="push_repo")
+    LogEntryKind.create(name="push_repo_failed")
     LogEntryKind.create(name="pull_repo")
+    LogEntryKind.create(name="pull_repo_failed")
     LogEntryKind.create(name="delete_repo")
     LogEntryKind.create(name="create_tag")
     LogEntryKind.create(name="move_tag")
     LogEntryKind.create(name="delete_tag")
+    LogEntryKind.create(name="delete_tag_failed")
     LogEntryKind.create(name="revert_tag")
     LogEntryKind.create(name="add_repo_permission")
     LogEntryKind.create(name="change_repo_permission")
@@ -456,9 +463,28 @@ def initialize_database():
     LogEntryKind.create(name="cancel_build")
 
     LogEntryKind.create(name="login_success")
+    LogEntryKind.create(name="login_failure")
     LogEntryKind.create(name="logout_success")
 
     LogEntryKind.create(name="permanently_delete_tag")
+    LogEntryKind.create(name="autoprune_tag_delete")
+
+    LogEntryKind.create(name="create_namespace_autoprune_policy")
+    LogEntryKind.create(name="update_namespace_autoprune_policy")
+    LogEntryKind.create(name="delete_namespace_autoprune_policy")
+
+    LogEntryKind.create(name="create_repository_autoprune_policy")
+    LogEntryKind.create(name="update_repository_autoprune_policy")
+    LogEntryKind.create(name="delete_repository_autoprune_policy")
+
+    LogEntryKind.create(name="enable_team_sync")
+    LogEntryKind.create(name="disable_team_sync")
+
+    LogEntryKind.create(name="oauth_token_assigned")
+    LogEntryKind.create(name="oauth_token_revoked")
+
+    LogEntryKind.create(name="export_logs_success")
+    LogEntryKind.create(name="export_logs_failure")
 
     ImageStorageLocation.create(name="local_eu")
     ImageStorageLocation.create(name="local_us")
@@ -484,6 +510,7 @@ def initialize_database():
     ExternalNotificationEvent.create(name="repo_mirror_sync_started")
     ExternalNotificationEvent.create(name="repo_mirror_sync_success")
     ExternalNotificationEvent.create(name="repo_mirror_sync_failed")
+    ExternalNotificationEvent.create(name="repo_image_expiry")
 
     ExternalNotificationMethod.create(name="quay_notification")
     ExternalNotificationMethod.create(name="email")
@@ -513,6 +540,11 @@ def initialize_database():
     NotificationKind.create(name="repo_mirror_sync_failed")
 
     NotificationKind.create(name="test_notification")
+
+    NotificationKind.create(name="quota_warning")
+    NotificationKind.create(name="quota_error")
+
+    NotificationKind.create(name="assigned_authorization")
 
     QuayRegion.create(name="us")
     QuayService.create(name="quay")
@@ -642,6 +674,12 @@ def populate_database(minimal=False):
     outside_org = model.user.create_user("outsideorg", "password", "no2@thanks.com")
     outside_org.verified = True
     outside_org.save()
+
+    subscriptionuser = model.user.create_user(
+        "subscription", "password", "subscriptions@devtable.com"
+    )
+    subscriptionuser.verified = True
+    subscriptionuser.save()
 
     model.notification.create_notification(
         "test_notification",
@@ -902,6 +940,32 @@ def populate_database(minimal=False):
     quota2 = model.namespacequota.create_namespace_quota(new_user_4, 6000)
     model.namespacequota.create_namespace_quota_limit(quota2, "reject", 90)
 
+    create_namespace_autoprune_policy(
+        "devtable", {"method": "number_of_tags", "value": 10}, create_task=True
+    )
+    create_namespace_autoprune_policy(
+        "buynlarge", {"method": "creation_date", "value": "5d"}, create_task=True
+    )
+
+    org_for_autoprune = model.organization.create_organization(
+        "testorgforautoprune", "autoprune@devtable.com", new_user_1
+    )
+    org_repo = __generate_repository(
+        org_for_autoprune,
+        "autoprunerepo",
+        "Repository owned by an org.",
+        False,
+        [],
+        (4, [], ["latest", "prod"]),
+    )
+
+    create_repository_autoprune_policy(
+        "devtable", simple_repo.name, {"method": "number_of_tags", "value": 10}, create_task=True
+    )
+    create_repository_autoprune_policy(
+        "public", publicrepo.name, {"method": "creation_date", "value": "5d"}, create_task=True
+    )
+
     liborg = model.organization.create_organization(
         "library", "quay+library@devtable.com", new_user_1
     )
@@ -914,6 +978,11 @@ def populate_database(minimal=False):
         "sellnsmall", "quay+sell@devtable.com", new_user_1
     )
     thirdorg.save()
+
+    subscriptionsorg = model.organization.create_organization(
+        "subscriptionsorg", "quay+subscriptionsorg@devtable.com", subscriptionuser
+    )
+    subscriptionsorg.save()
 
     model.user.create_robot("coolrobot", org)
 
@@ -929,6 +998,9 @@ def populate_database(minimal=False):
         "http://localhost:8000",
         "http://localhost:8000/o2c.html",
         client_id="deadbeef",
+    )
+    assign_token_to_user(
+        oauth_app_1, new_user_1, "http://localhost:8000/o2c.html", "repo:admin", "token"
     )
 
     model.oauth.create_application(
@@ -1327,6 +1399,28 @@ def populate_database(minimal=False):
         ),
     )
 
+    globalreadonlysuperuser = model.user.create_user(
+        "globalreadonlysuperuser", "password", "globalreadonlysuperuser+test@devtable.com"
+    )
+    globalreadonlysuperuser.verified = True
+    globalreadonlysuperuser.save()
+
+    normaluser = model.user.create_user("normaluser", "password", "normaluser+test@devtable.com")
+    normaluser.verified = True
+    normaluser.save()
+    orgwithnosuperuser = model.organization.create_organization(
+        "orgwithnosuperuser", "orgwithnosuperuser@devtable.com", normaluser
+    )
+    orgwithnosuperuser.save()
+
+    team = model.team.create_team("readers", orgwithnosuperuser, "member", "Readers of neworg.")
+    model.team.add_user_to_team(new_user_4, team)
+
+    model.repository.create_repository(orgwithnosuperuser.username, "repo", orgwithnosuperuser)
+
+    neworg_quota = model.namespacequota.create_namespace_quota(orgwithnosuperuser, 3000)
+    model.namespacequota.create_namespace_quota_limit(neworg_quota, "warning", 50)
+
 
 WHITELISTED_EMPTY_MODELS = [
     "DeletedNamespace",
@@ -1347,6 +1441,9 @@ WHITELISTED_EMPTY_MODELS = [
     "RedHatSubscriptions",
     "OrganizationRhSkus",
     "QuotaRegistrySize",
+    "NamespaceAutoPrunePolicy",
+    "AutoPruneTaskStatus",
+    "TagNotificationSuccess",
 ]
 
 

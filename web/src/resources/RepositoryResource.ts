@@ -7,6 +7,8 @@ import {
   throwIfError,
 } from './ErrorHandling';
 import {IAvatar} from './OrganizationResource';
+import {EntityKind} from './UserResource';
+import {isNullOrUndefined} from 'src/libs/utils';
 
 export interface IRepository {
   namespace: string;
@@ -33,17 +35,36 @@ export interface IQuotaReport {
   configured_quota: number;
 }
 
+export enum RepositoryState {
+  NORMAL = 'NORMAL',
+  READ_ONLY = 'READ_ONLY',
+  MIRROR = 'MIRROR',
+}
+
 export async function fetchAllRepos(
   namespaces: string[],
   flatten = false,
   signal: AbortSignal,
   next_page_token = null,
 ): Promise<IRepository[] | IRepository[][]> {
-  const namespacedRepos = await Promise.all(
-    namespaces.map((ns) => {
-      return fetchRepositoriesForNamespace(ns, signal, next_page_token);
-    }),
-  );
+  const namespacedRepos = [];
+
+  if (isNullOrUndefined(namespaces) || namespaces.length === 0) {
+    return [];
+  }
+
+  // Batch the number of requests by arbitrary number BATCH_SIZE
+  // to not overwhelm the browser with too many simultaneous requests
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < namespaces.length; i += BATCH_SIZE) {
+    const batch = namespaces.slice(i, i + BATCH_SIZE);
+    const batchRepos = await Promise.all(
+      batch.map((ns) => {
+        return fetchRepositoriesForNamespace(ns, signal, next_page_token);
+      }),
+    );
+    namespacedRepos.push(...batchRepos);
+  }
 
   // Flatten responses to a single list of all repositories
   if (flatten) {
@@ -147,6 +168,20 @@ export async function setRepositoryVisibility(
   return response.data;
 }
 
+export async function setRepositoryState(
+  namespace: string,
+  repositoryName: string,
+  state: RepositoryState,
+) {
+  // TODO: Add return type to AxiosResponse
+  const api = `/api/v1/repository/${namespace}/${repositoryName}/changestate`;
+  const response: AxiosResponse = await axios.put(api, {
+    state,
+  });
+  assertHttpCode(response.status, 200);
+  return response.data;
+}
+
 export async function bulkDeleteRepositories(repos: IRepository[]) {
   const responses = await Promise.allSettled(
     repos.map((repo) => deleteRepository(repo.namespace, repo.name)),
@@ -203,7 +238,7 @@ export interface RepoMember {
   org: string;
   repo: string;
   name: string;
-  type: MemberType;
+  type: EntityKind;
   role: RepoRole;
 }
 
@@ -213,14 +248,8 @@ export enum RepoRole {
   admin = 'admin',
 }
 
-export enum MemberType {
-  user = 'user',
-  robot = 'robot',
-  team = 'team',
-}
-
 export async function setRepoPermissions(role: RepoMember, newRole: RepoRole) {
-  const type = role.type == MemberType.robot ? MemberType.user : role.type;
+  const type = role.type == EntityKind.robot ? EntityKind.user : role.type;
   try {
     await axios.put(
       `/api/v1/repository/${role.org}/${role.repo}/permissions/${type}/${role.name}`,
@@ -253,7 +282,7 @@ export async function bulkDeleteRepoPermissions(roles: RepoMember[]) {
 }
 
 export async function deleteRepoPermissions(role: RepoMember) {
-  const roleType = role.type == MemberType.robot ? MemberType.user : role.type;
+  const roleType = role.type == EntityKind.robot ? EntityKind.user : role.type;
   try {
     await axios.delete(
       `/api/v1/repository/${role.org}/${role.repo}/permissions/${roleType}/${role.name}`,
@@ -292,5 +321,32 @@ export async function deleteRepository(ns: string, name: string) {
       `${ns}/${name}`,
       err,
     );
+  }
+}
+
+interface EntityTransitivePermission {
+  role: string;
+}
+
+interface EntityTransitivePermissionResponse {
+  permissions: EntityTransitivePermission[];
+}
+
+export async function fetchEntityTransitivePermission(
+  org: string,
+  repo: string,
+  entity: string,
+) {
+  try {
+    const response: AxiosResponse<EntityTransitivePermissionResponse> =
+      await axios.get(
+        `/api/v1/repository/${org}/${repo}/permissions/user/${entity}/transitive`,
+      );
+    return response.data.permissions;
+  } catch (error) {
+    // The backend returns a 404 if the entity exists but has no permissions
+    if (error instanceof AxiosError && error.response?.status == 404) {
+      return [];
+    }
   }
 }

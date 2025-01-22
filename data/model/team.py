@@ -65,12 +65,12 @@ def create_team(name, org_obj, team_role_name, description=""):
 
 
 def add_user_to_team(user_obj, team):
-    try:
-        return TeamMember.create(user=user_obj, team=team)
-    except Exception:
+    if user_exists_in_team(user_obj, team):
         raise UserAlreadyInTeam(
             "User %s is already a member of team %s" % (user_obj.username, team.name)
         )
+
+    return TeamMember.create(user=user_obj, team=team)
 
 
 def remove_user_from_team(org_name, team_name, username, removed_by_username):
@@ -497,7 +497,7 @@ def remove_team_syncing(orgname, teamname):
         existing.delete_instance()
 
 
-def get_stale_team(stale_timespan):
+def get_stale_team(stale_timespan, login_services):
     """
     Returns a team that is setup to sync to an external group, and who has not been synced in.
 
@@ -508,7 +508,11 @@ def get_stale_team(stale_timespan):
     try:
         candidates = (
             TeamSync.select(TeamSync.id)
-            .where((TeamSync.last_updated <= stale_at) | (TeamSync.last_updated >> None))
+            .join(LoginService)
+            .where(
+                LoginService.name << login_services,
+                (TeamSync.last_updated <= stale_at) | (TeamSync.last_updated >> None),
+            )
             .limit(500)
             .alias("candidates")
         )
@@ -569,3 +573,53 @@ def delete_members_not_present(team, member_id_set):
             return query.execute()
 
     return 0
+
+
+def get_federated_user_teams(user_obj, login_service_name):
+    """
+    Return all user's teams that are synced with the login service
+    """
+    query = (
+        Team.select(Team, TeamSync)
+        .join(TeamMember)
+        .switch(Team)
+        .join(TeamSync)
+        .join(LoginService)
+        .where(TeamMember.user == user_obj, LoginService.name == login_service_name)
+    )
+    return query
+
+
+def delete_all_team_members(team):
+    """
+    Delete all users that are a member of the given team
+    """
+    with db_transaction():
+        user_ids = set([u.id for u in list_team_users(team)])
+        if user_ids:
+            query = TeamMember.delete().where(TeamMember.team == team, TeamMember.user << user_ids)
+            return query.execute()
+
+    return 0
+
+
+def get_oidc_team_from_groupname(group_name, login_service_name):
+    """
+    Fetch TeamSync row synced with login_service_name from `group_name` in TeamSync.config
+    """
+    response = []
+    query_result = (
+        TeamSync.select()
+        .join(LoginService)
+        .where(TeamSync.config.contains(group_name), LoginService.name == login_service_name)
+    )
+
+    for row in query_result:
+        if json.loads(row.config).get("group_name", None) == group_name:
+            response.append(row)
+
+    return response
+
+
+def user_exists_in_team(user_obj, team):
+    return TeamMember.select().where(TeamMember.user == user_obj, TeamMember.team == team).exists()

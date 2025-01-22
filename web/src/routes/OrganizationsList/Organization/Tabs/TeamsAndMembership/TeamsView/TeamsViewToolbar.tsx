@@ -4,6 +4,7 @@ import {
   Toolbar,
   ToolbarContent,
   ToolbarItem,
+  Button,
 } from '@patternfly/react-core';
 import Conditional from 'src/components/empty/Conditional';
 import {DropdownCheckbox} from 'src/components/toolbar/DropdownCheckbox';
@@ -30,7 +31,7 @@ export default function TeamsViewToolbar(props: TeamsViewToolbarProps) {
           searchState={props.search}
           setSearchState={props.setSearch}
         />
-        <Flex className="pf-u-mr-md">
+        <Flex className="pf-v5-u-mr-md">
           <FlexItem>
             <SearchInput
               searchState={props.search}
@@ -40,7 +41,23 @@ export default function TeamsViewToolbar(props: TeamsViewToolbarProps) {
           </FlexItem>
         </Flex>
         <ToolbarItem>
-          <Conditional if={props.selectedTeams?.length !== 0}>
+          <Conditional if={props.isAdmin && !props.isReadOnly}>
+            <Button
+              onClick={() => props.handleModalToggle()}
+              data-testid="create-new-team-button"
+            >
+              Create new team
+            </Button>
+          </Conditional>
+        </ToolbarItem>
+        <ToolbarItem>
+          <Conditional
+            if={
+              props.selectedTeams?.length !== 0 &&
+              props.isAdmin &&
+              !props.isReadOnly
+            }
+          >
             <Kebab
               isKebabOpen={props.isKebabOpen}
               setKebabOpen={props.setKebabOpen}
@@ -87,4 +104,7 @@ interface TeamsViewToolbarProps {
   deleteModal: object;
   isSetRepoPermModalOpen: boolean;
   setRepoPermModal: object;
+  handleModalToggle: () => void;
+  isReadOnly: boolean;
+  isAdmin: boolean;
 }

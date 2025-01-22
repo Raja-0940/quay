@@ -6,13 +6,14 @@ import logging
 import os
 from functools import wraps
 
-from flask import abort, make_response, request
+from flask import request
+from ua_parser import user_agent_parser
 
 import features
 from app import app, ip_resolver, model_cache, usermanager
 from auth.auth_context import get_authenticated_context, get_authenticated_user
 from data.database import RepositoryState
-from data.model import InvalidProxyCacheConfigException
+from data.model import InvalidProxyCacheConfigException, PushesDisabledException
 from data.model.repo_mirror import get_mirror, get_mirroring_robot
 from data.model.repository import get_repository, get_repository_state
 from data.readreplica import ReadOnlyModeException
@@ -196,6 +197,31 @@ def check_readonly(func):
     return wrapper
 
 
+def check_pushes_disabled(func):
+    """
+    Validates that a non-GET method is not invoked when the registry has pushes disabled, unless
+    explicitly marked as being allowed.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Skip if a GET method.
+        if request.method == "GET":
+            return func(*args, **kwargs)
+
+        # Skip if pushes are enabled.
+        if not app.config.get("DISABLE_PUSHES", False):
+            return func(*args, **kwargs)
+
+        # Skip if readonly access is allowed.
+        if hasattr(func, "__readonly_call_allowed"):
+            return func(*args, **kwargs)
+
+        raise PushesDisabledException()
+
+    return wrapper
+
+
 def route_show_if(value):
     """
     Adds/shows the decorated route if the given value is True.
@@ -235,11 +261,40 @@ def require_xhr_from_browser(func):
     text attacks.
     """
 
+    # https://github.com/pallets/werkzeug/issues/2078
+    browsers = (
+        "aol",
+        "ask",
+        "camino",
+        "chrome",
+        "firefox",
+        "galeon",
+        "google",
+        "kmeleon",
+        "konqueror",
+        "links",
+        "lynx",
+        "msie",
+        "msn",
+        "netscape",
+        "opera",
+        "safari",
+        "seamonkey",
+        "webkit",
+        "yahoo",
+    )
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if app.config.get("BROWSER_API_CALLS_XHR_ONLY", False):
-            if request.method == "GET" and request.user_agent.browser:
+            if (
+                request.method == "GET"
+                and request.user_agent.string
+                and user_agent_parser.ParseUserAgent(request.user_agent.string)["family"].lower()
+                in browsers
+            ):
                 has_xhr_header = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
                 if not has_xhr_header and not app.config.get("DEBUGGING") == True:
                     logger.warning(
                         "Disallowed possible RTA to URL %s with user agent %s",

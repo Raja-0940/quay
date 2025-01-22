@@ -1,48 +1,71 @@
 import React from 'react';
-import {
-  TextInput,
-  ToolbarItem,
-  Dropdown,
-  DropdownToggle,
-} from '@patternfly/react-core';
-import {SearchState} from './SearchTypes';
 import {SetterOrUpdater} from 'recoil';
+import {
+  Button,
+  Dropdown,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
+  TextInputGroup,
+  TextInputGroupMain,
+  TextInputGroupUtilities,
+  ToolbarItem,
+} from '@patternfly/react-core';
+import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon';
+import {SearchState} from './SearchTypes';
 
 export function FilterWithDropdown(props: FilterWithDropdownProps) {
-  const setSearchState = (val: string) => {
-    props.onChange((prev: SearchState) => ({...prev, query: val.trim()}));
-  };
   const [isOpen, setIsOpen] = React.useState(false);
 
-  const onSelect = () => {
-    setIsOpen(false);
-  };
+  const setSearchState = React.useCallback(
+    (val: string) =>
+      props.onChange((prev: SearchState) => ({...prev, query: val.trim()})),
+    [],
+  );
 
   return (
     <ToolbarItem variant="search-filter">
       <Dropdown
-        onSelect={onSelect}
-        toggle={
-          <DropdownToggle
-            splitButtonItems={[
-              <TextInput
-                isRequired
-                type="search"
+        onSelect={() => setIsOpen(false)}
+        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            ref={toggleRef}
+            variant="typeahead"
+            isFullWidth
+            onClick={() => setIsOpen(() => !isOpen)}
+            id="toggle-split-button"
+            isExpanded={isOpen}
+          >
+            <TextInputGroup isPlain>
+              <TextInputGroupMain
                 id="filter-with-dropdown"
-                key="filter-with-dropdown"
                 name="search input"
                 placeholder={props.searchInputText}
                 value={props.searchState.query}
-                onChange={setSearchState}
-              />,
-            ]}
-            onToggle={(isOpen: boolean) => setIsOpen(isOpen)}
-            id="toggle-split-button"
-          />
-        }
+                onChange={(_event, val: string) => setSearchState(val)}
+                autoComplete="off"
+              />
+            </TextInputGroup>
+
+            <TextInputGroupUtilities>
+              {!!props.searchState.query && (
+                <Button
+                  variant="plain"
+                  onClick={() => setSearchState('')}
+                  aria-label="Clear input value"
+                >
+                  <TimesIcon aria-hidden />
+                </Button>
+              )}
+            </TextInputGroupUtilities>
+          </MenuToggle>
+        )}
         isOpen={isOpen}
-        dropdownItems={props.dropdownItems}
-      />
+        onOpenChange={(isOpen) => setIsOpen(isOpen)}
+        shouldFocusToggleOnSelect
+      >
+        <DropdownList>{props.dropdownItems}</DropdownList>
+      </Dropdown>
     </ToolbarItem>
   );
 }

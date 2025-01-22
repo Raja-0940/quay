@@ -1,11 +1,13 @@
+import {useState} from 'react';
 import {
   Dropdown,
   DropdownItem,
-  KebabToggle,
-  DropdownPosition,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
 } from '@patternfly/react-core';
+import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon';
 import {IRobot} from 'src/resources/RobotsResource';
-import {useState} from 'react';
 
 export default function RobotAccountKebab(props: RobotAccountKebabProps) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -27,41 +29,56 @@ export default function RobotAccountKebab(props: RobotAccountKebabProps) {
     props.onSetRepoPermsClick(props.robotAccount, props.robotAccountRepos);
   };
 
+  const onSetRobotFederation = () => {
+    props.onSetRobotFederationClick(props.robotAccount);
+  };
+
   return (
     <>
       <Dropdown
         onSelect={onSelect}
-        toggle={
-          <KebabToggle
+        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            ref={toggleRef}
+            variant="plain"
             id={`${props.robotAccount.name}-toggle-kebab`}
-            onToggle={() => {
-              setIsOpen(!isOpen);
-            }}
-          />
-        }
+            data-testid={`${props.robotAccount.name}-toggle-kebab`}
+            onClick={() => setIsOpen(!isOpen)}
+            isExpanded={isOpen}
+          >
+            <EllipsisVIcon />
+          </MenuToggle>
+        )}
         isOpen={isOpen}
-        dropdownItems={[
+        onOpenChange={(isOpen) => setIsOpen(isOpen)}
+        shouldFocusToggleOnSelect
+        popperProps={{
+          enableFlip: true,
+          position: 'right',
+        }}
+      >
+        <DropdownList>
           <DropdownItem
-            key="set-repo-perms"
             onClick={() => onSetRepoPerms()}
             id={`${props.robotAccount.name}-set-repo-perms-btn`}
           >
-            {props.deleteKebabIsOpen ? props.deleteModal() : null}
             Set repository permissions
-          </DropdownItem>,
+          </DropdownItem>
           <DropdownItem
-            key="delete"
+            onClick={() => onSetRobotFederation()}
+            id={`${props.robotAccount.name}-set-robot-federation-btn`}
+          >
+            Set robot federation
+          </DropdownItem>
+          <DropdownItem
             onClick={() => onDelete()}
             className="red-color"
             id={`${props.robotAccount.name}-del-btn`}
           >
-            {props.deleteKebabIsOpen ? props.deleteModal() : null}
             Delete
-          </DropdownItem>,
-        ]}
-        isPlain
-        position={DropdownPosition.right}
-      />
+          </DropdownItem>
+        </DropdownList>
+      </Dropdown>
     </>
   );
 }
@@ -75,5 +92,6 @@ interface RobotAccountKebabProps {
   setDeleteModalOpen: (open) => void;
   setSelectedRobotAccount: (robotAccount) => void;
   onSetRepoPermsClick: (robotAccount, repos) => void;
+  onSetRobotFederationClick: (robotAccount) => void;
   robotAccountRepos: any[];
 }

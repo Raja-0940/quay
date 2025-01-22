@@ -1,6 +1,7 @@
 import logging
 
 from flask import jsonify, make_response
+from werkzeug.routing.exceptions import RequestRedirect
 
 from app import app
 from data import model
@@ -69,3 +70,8 @@ def handle_not_implemented_error(ex):
     response = jsonify({"message": str(ex)})
     response.status_code = 501
     return response
+
+
+@app.errorhandler(RequestRedirect)
+def handle_bad_redirect(ex):
+    return ex.get_response()

@@ -1,7 +1,6 @@
 import json
 from calendar import timegm
 from datetime import datetime, timedelta
-from test.fixtures import *
 
 import pytest
 from mock import patch
@@ -9,12 +8,13 @@ from playhouse.test_utils import assert_query_count
 
 from app import storage
 from data import model
-from data.database import ImageStorageLocation, ManifestChild, Repository, Tag
+from data.database import ImageStorageLocation, ManifestChild, Repository, Tag, User
 from data.model.blob import store_blob_record_and_temp_link
 from data.model.oci.manifest import get_or_create_manifest
 from data.model.oci.tag import (
     change_tag_expiration,
     create_temporary_tag_if_necessary,
+    create_temporary_tag_outside_timemachine,
     delete_tag,
     delete_tags_for_manifest,
     filter_to_alive_tags,
@@ -43,6 +43,7 @@ from data.model.user import get_user
 from digest.digest_tools import sha256_digest
 from image.docker.schema2.list import DockerSchema2ManifestListBuilder
 from image.docker.schema2.manifest import DockerSchema2ManifestBuilder
+from test.fixtures import *
 from util.bytes import Bytes
 
 
@@ -126,7 +127,7 @@ def test_list_alive_tags(initialized_db):
 def test_lookup_alive_tags_shallow(initialized_db):
     found = False
     for tag in filter_to_visible_tags(filter_to_alive_tags(Tag.select())):
-        tags = lookup_alive_tags_shallow(tag.repository)
+        tags, _ = lookup_alive_tags_shallow(tag.repository)
         found = True
         assert tag in tags
 
@@ -137,7 +138,7 @@ def test_lookup_alive_tags_shallow(initialized_db):
     tag.hidden = True
     tag.save()
 
-    tags = lookup_alive_tags_shallow(tag.repository)
+    tags, _ = lookup_alive_tags_shallow(tag.repository)
     assert tag not in tags
 
 
@@ -348,7 +349,7 @@ def test_delete_tag(initialized_db):
             assert get_tag(repo, tag.name) == tag
             assert tag.lifetime_end_ms is None
 
-            with assert_query_count(3):
+            with assert_query_count(4):
                 assert delete_tag(repo, tag.name) == tag
 
             assert get_tag(repo, tag.name) is None
@@ -370,7 +371,7 @@ def test_delete_tag_manifest_list(initialized_db):
             assert child_tag.name.startswith("$temp-")
             assert child_tag.lifetime_end_ms > get_epoch_timestamp_ms()
 
-        with assert_query_count(8):
+        with assert_query_count(9):
             assert delete_tag(repository.id, tag.name) == tag
 
         # Assert temporary tags pointing to child manifest are now expired
@@ -388,7 +389,7 @@ def test_delete_tags_for_manifest(initialized_db):
             repo = tag.repository
             assert get_tag(repo, tag.name) == tag
 
-            with assert_query_count(5):
+            with assert_query_count(6):
                 assert delete_tags_for_manifest(tag.manifest) == [tag]
 
             assert get_tag(repo, tag.name) is None
@@ -495,6 +496,31 @@ def test_create_temporary_tag_if_necessary(initialized_db):
     # Try again and ensure it is not created.
     created = create_temporary_tag_if_necessary(manifest, 30)
     assert created is None
+
+
+def test_create_temporary_tag_outside_timemachine(initialized_db):
+    tag = Tag.get()
+    manifest = tag.manifest
+    assert manifest is not None
+
+    created = create_temporary_tag_outside_timemachine(manifest)
+
+    namespace = (
+        User.select(User.removed_tag_expiration_s)
+        .join(Repository, on=(Repository.namespace_user == User.id))
+        .where(Repository.id == manifest.repository_id)
+        .get()
+    )
+
+    assert created is not None and created
+    assert created.hidden
+    assert created.name.startswith("$temp-")
+    assert created.manifest == manifest
+    assert created.lifetime_end_ms is not None
+    assert (
+        created.lifetime_end_ms
+        < get_epoch_timestamp_ms() - namespace.removed_tag_expiration_s * 1000
+    )
 
 
 def test_retarget_tag(initialized_db):

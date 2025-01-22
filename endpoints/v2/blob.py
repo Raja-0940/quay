@@ -22,9 +22,11 @@ from data.registry_model.blobuploader import (
     retrieve_blob_upload_manager,
 )
 from digest import digest_tools
+from endpoints.api import log_unauthorized
 from endpoints.decorators import (
     anon_allowed,
     anon_protect,
+    check_pushes_disabled,
     check_readonly,
     check_region_blacklisted,
     disallow_for_account_recovery_mode,
@@ -119,7 +121,13 @@ def download_blob(namespace_name, repo_name, digest, registry_model):
     user = get_authenticated_user()
     username = user.username if user else None
     direct_download_url = storage.get_direct_download_url(
-        blob.placements, path, get_request_ip(), username=username, namespace=namespace_name
+        blob.placements,
+        path,
+        get_request_ip(),
+        username=username,
+        namespace=namespace_name,
+        repo_name=repo_name,
+        cdn_specific=_is_cdn_specific(namespace_name),
     )
     if direct_download_url:
         logger.debug("Returning direct download URL")
@@ -144,10 +152,18 @@ def download_blob(namespace_name, repo_name, digest, registry_model):
         )
 
 
+def _is_cdn_specific(namespace):
+    # Checks if blob belongs to namespace that should have cdn url returned
+    logger.debug("Checking for namespace %s", namespace)
+    namespaces = app.config.get("CDN_SPECIFIC_NAMESPACES")
+    return namespace in namespaces
+
+
 def _try_to_mount_blob(repository_ref, mount_blob_digest):
     """
     Attempts to mount a blob requested by the user from another repository.
     """
+
     logger.debug("Got mount request for blob `%s` into `%s`", mount_blob_digest, repository_ref)
     from_repo = request.args.get("from", None)
     if from_repo is None:
@@ -240,16 +256,20 @@ def _try_to_mount_blob(repository_ref, mount_blob_digest):
 @disallow_for_account_recovery_mode
 @parse_repository_name()
 @process_registry_jwt_auth(scopes=["pull", "push"])
+@log_unauthorized("push_repo_failed")
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def start_blob_upload(namespace_name, repo_name):
 
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
         raise NameUnknown("repository not found")
 
-    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False):
+    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False) and app.config.get(
+        "FEATURE_VERIFY_QUOTA", True
+    ):
         quota = namespacequota.verify_namespace_quota(repository_ref)
         if quota["severity_level"] == "Reject":
             namespacequota.notify_organization_admins(
@@ -342,12 +362,15 @@ def fetch_existing_upload(namespace_name, repo_name, upload_uuid):
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def upload_chunk(namespace_name, repo_name, upload_uuid):
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
         raise NameUnknown("repository not found")
 
-    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False):
+    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False) and app.config.get(
+        "FEATURE_VERIFY_QUOTA", True
+    ):
         quota = namespacequota.verify_namespace_quota_during_upload(repository_ref)
         if quota["severity_level"] == "Reject":
             namespacequota.notify_organization_admins(
@@ -383,6 +406,7 @@ def upload_chunk(namespace_name, repo_name, upload_uuid):
 @anon_protect
 @check_readonly
 def monolithic_upload_or_last_chunk(namespace_name, repo_name, upload_uuid):
+
     # Ensure the digest is present before proceeding.
     digest = request.args.get("digest", None)
     if digest is None:
@@ -393,7 +417,9 @@ def monolithic_upload_or_last_chunk(namespace_name, repo_name, upload_uuid):
     if repository_ref is None:
         raise NameUnknown("repository not found")
 
-    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False):
+    if app.config.get("FEATURE_QUOTA_MANAGEMENT", False) and app.config.get(
+        "FEATURE_VERIFY_QUOTA", True
+    ):
         quota = namespacequota.verify_namespace_quota_during_upload(repository_ref)
         if quota["severity_level"] == "Reject":
             namespacequota.notify_organization_admins(
@@ -431,6 +457,7 @@ def monolithic_upload_or_last_chunk(namespace_name, repo_name, upload_uuid):
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def cancel_upload(namespace_name, repo_name, upload_uuid):
     repository_ref = registry_model.lookup_repository(namespace_name, repo_name)
     if repository_ref is None:
@@ -453,6 +480,7 @@ def cancel_upload(namespace_name, repo_name, upload_uuid):
 @require_repo_write(allow_for_superuser=True, disallow_for_restricted_users=True)
 @anon_protect
 @check_readonly
+@check_pushes_disabled
 def delete_digest(namespace_name, repo_name, digest):
     # We do not support deleting arbitrary digests, as they break repo images.
     raise Unsupported()

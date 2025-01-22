@@ -1,14 +1,13 @@
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {
   bulkDeleteTeams,
-  createNewTeamForNamespac,
+  createNewTeamForNamespace,
   fetchTeamRepoPermsForOrg,
   fetchTeamsForNamespace,
   updateTeamRepoPerm,
-  updateTeamRoleForNamespace,
+  updateTeamDetailsForNamespace,
 } from 'src/resources/TeamResources';
 import {useState} from 'react';
-import {IAvatar} from 'src/resources/OrganizationResource';
 import {teamViewColumnNames} from 'src/routes/OrganizationsList/Organization/Tabs/TeamsAndMembership/TeamsView/TeamsViewList';
 import {SearchState} from 'src/components/toolbar/SearchTypes';
 import {setRepoPermForTeamColumnNames} from 'src/routes/OrganizationsList/Organization/Tabs/TeamsAndMembership/TeamsView/SetRepoPermissionsModal/SetRepoPermissionForTeamModal';
@@ -18,32 +17,54 @@ import {
 } from 'src/resources/RepositoryResource';
 import {BulkOperationError, ResourceError} from 'src/resources/ErrorHandling';
 import {useCurrentUser} from './UseCurrentUser';
+import {IAvatar} from 'src/resources/OrganizationResource';
+import {useAlerts} from './UseAlerts';
+import {AlertVariant} from 'src/atoms/AlertState';
+import {addRepoPermissionToTeam} from 'src/resources/DefaultPermissionResource';
 
-export function useCreateTeam(ns) {
-  const [namespace] = useState(ns);
+interface createNewTeamForNamespaceParams {
+  teamName: string;
+  description: string;
+}
+
+export function useCreateTeam(orgName, {onSuccess, onError}) {
   const queryClient = useQueryClient();
+  const {addAlert} = useAlerts();
 
-  const createTeamMutator = useMutation(
-    async ({namespace, name, description}: createNewTeamForNamespaceParams) => {
-      return createNewTeamForNamespac(namespace, name, description);
+  const {
+    data: responseData,
+    mutate: createNewTeamHook,
+    isError: errorCreateTeam,
+    isSuccess: successCreateTeam,
+  } = useMutation(
+    async ({teamName, description}: createNewTeamForNamespaceParams) => {
+      return createNewTeamForNamespace(orgName, teamName, description);
     },
     {
-      onSuccess: () => {
-        queryClient.invalidateQueries(['organization', namespace, 'teams']);
+      onSuccess: (data) => {
+        if (data.new_team) {
+          onSuccess();
+          queryClient.invalidateQueries(['organization', orgName, 'teams']);
+          queryClient.invalidateQueries(['teams']);
+        } else {
+          addAlert({
+            variant: AlertVariant.Failure,
+            title: `Team "${data.name}" already exists`,
+          });
+        }
+      },
+      onError: () => {
+        onError();
       },
     },
   );
 
   return {
-    createNewTeamHook: async (params: createNewTeamForNamespaceParams) =>
-      createTeamMutator.mutate(params),
+    responseData,
+    createNewTeamHook,
+    errorCreateTeam,
+    successCreateTeam,
   };
-}
-
-interface createNewTeamForNamespaceParams {
-  namespace: string;
-  name: string;
-  description: string;
 }
 
 export interface ITeams {
@@ -60,7 +81,7 @@ export interface ITeams {
 export function useFetchTeams(orgName: string) {
   const {user} = useCurrentUser();
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [search, setSearch] = useState<SearchState>({
     query: '',
     field: teamViewColumnNames.teamName,
@@ -80,7 +101,7 @@ export function useFetchTeams(orgName: string) {
     },
   );
 
-  const teams: ITeams[] = Object.values(data);
+  const teams: ITeams[] = data ? Object.values(data) : [];
 
   const filteredTeams =
     search.query !== ''
@@ -95,8 +116,8 @@ export function useFetchTeams(orgName: string) {
   return {
     teams: teams,
     filteredTeams,
-    paginatedTeams: paginatedTeams,
-    loading: isLoading || isPlaceholderData,
+    paginatedTeams,
+    isLoadingTeams: isLoading || isPlaceholderData,
     error: errorLoadingTeams,
     page,
     setPage,
@@ -115,7 +136,7 @@ export interface ITeamRepoPerms {
 
 export function useFetchRepoPermForTeam(orgName: string, teamName: string) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [search, setSearch] = useState<SearchState>({
     query: '',
     field: setRepoPermForTeamColumnNames.repoName,
@@ -213,16 +234,28 @@ export function useDeleteTeam({orgName, onSuccess, onError}) {
   };
 }
 
-export function useUpdateTeamRole(orgName: string) {
+export function useUpdateTeamDetails(orgName: string) {
   const queryClient = useQueryClient();
   const {
-    mutate: updateTeamRole,
-    isError: errorUpdateTeamRole,
-    isSuccess: successUpdateTeamRole,
-    reset: resetUpdateTeamRole,
+    mutate: updateTeamDetails,
+    isError: errorUpdateTeamDetails,
+    isSuccess: successUpdateTeamDetails,
   } = useMutation(
-    async ({teamName, teamRole}: {teamName: string; teamRole: string}) => {
-      return updateTeamRoleForNamespace(orgName, teamName, teamRole);
+    async ({
+      teamName,
+      teamRole,
+      teamDescription,
+    }: {
+      teamName: string;
+      teamRole: string;
+      teamDescription?: string;
+    }) => {
+      return updateTeamDetailsForNamespace(
+        orgName,
+        teamName,
+        teamRole,
+        teamDescription,
+      );
     },
     {
       onSuccess: () => {
@@ -231,10 +264,9 @@ export function useUpdateTeamRole(orgName: string) {
     },
   );
   return {
-    updateTeamRole,
-    errorUpdateTeamRole,
-    successUpdateTeamRole,
-    resetUpdateTeamRole,
+    updateTeamDetails,
+    errorUpdateTeamDetails,
+    successUpdateTeamDetails,
   };
 }
 
@@ -263,5 +295,29 @@ export function useUpdateTeamRepoPerm(orgName: string, teamName: string) {
       detailedErrorUpdateRepoPerm as BulkOperationError<ResourceError>,
     successUpdateRepoPerm,
     resetUpdateRepoPerm,
+  };
+}
+
+export function useAddRepoPermissionToTeam(orgName: string, teamName: string) {
+  const queryClient = useQueryClient();
+  const {
+    mutate: addRepoPermToTeam,
+    isError: errorAddingRepoPermissionToTeam,
+    isSuccess: successAddingRepoPermissionToTeam,
+  } = useMutation(
+    async ({repoName, newRole}: {repoName: string; newRole: string}) => {
+      return addRepoPermissionToTeam(orgName, repoName, teamName, newRole);
+    },
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(['teams']);
+        queryClient.invalidateQueries(['teamrepopermissions']);
+      },
+    },
+  );
+  return {
+    addRepoPermToTeam,
+    errorAddingRepoPermissionToTeam,
+    successAddingRepoPermissionToTeam,
   };
 }

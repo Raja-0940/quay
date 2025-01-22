@@ -8,13 +8,6 @@ describe('Repository Settings - Permissions', () => {
       .then((token) => {
         cy.loginByCSRF(token);
       });
-    // Enable the repository settings feature
-    cy.intercept('GET', '/config', (req) =>
-      req.reply((res) => {
-        res.body.features['UI_V2_REPO_SETTINGS'] = true;
-        return res;
-      }),
-    ).as('getConfig');
     cy.visit('/repository/testorg/testrepo?tab=settings');
   });
 
@@ -86,7 +79,7 @@ describe('Repository Settings - Permissions', () => {
 
   it('Bulk deletes permissions', () => {
     cy.contains('1 - 4 of 4').should('exist');
-    cy.get('#permissions-select-all').click();
+    cy.get('[name="permissions-select-all"]').click();
     cy.contains('Actions').click();
     cy.get('#bulk-delete-permissions').contains('Delete').click();
     cy.get('table').within(() => {
@@ -98,10 +91,10 @@ describe('Repository Settings - Permissions', () => {
 
   it('Bulk changes permissions', () => {
     cy.contains('1 - 4 of 4').should('exist');
-    cy.get('#permissions-select-all').click();
+    cy.get('[name="permissions-select-all"]').click();
     cy.contains('Actions').click();
     cy.contains('Change Permissions').click();
-    cy.get('#change-permissions-menu').within(() => {
+    cy.get('[data-testid="change-permissions-menu-list"]').within(() => {
       cy.contains('Write').click();
     });
     const user1Row = cy.get('tr:contains("user1")');
@@ -125,10 +118,18 @@ describe('Repository Settings - Permissions', () => {
   });
 
   it('Adds user/robot/team permission', () => {
-    cy.contains('Add Permissions').click();
+    cy.contains('Add permissions').click();
     cy.get('#add-permission-form').within(() => {
-      cy.get('input').type('user');
-      cy.get('li:contains("user2")').click();
+      // We need the wait otherwise the dropdown won't open
+      cy.wait(2000);
+      cy.get('input[placeholder="Search for user, add/create robot account"]')
+        .click()
+        .type('user');
+      cy.get(
+        'input[placeholder="Search for user, add/create robot account"]',
+      ).should('have.value', 'user');
+
+      cy.get('button:contains("user2")').click();
       cy.contains('admin').click();
       cy.contains('Read').click();
       cy.contains('Submit').click();
@@ -139,9 +140,17 @@ describe('Repository Settings - Permissions', () => {
       cy.get(`[data-label="type"]`).should('have.text', ' User ');
       cy.get(`[data-label="role"]`).should('have.text', 'read');
     });
-    cy.contains('Add Permissions').click();
+    cy.contains('Add permissions').click();
     cy.get('#add-permission-form').within(() => {
-      cy.get('input').type('test');
+      // We need the wait otherwise the dropdown won't open
+      cy.wait(2000);
+      cy.get('input[placeholder="Search for user, add/create robot account"]')
+        .click()
+        .type('test');
+      cy.get(
+        'input[placeholder="Search for user, add/create robot account"]',
+      ).should('have.value', 'test');
+
       cy.contains('testorg+testrobot2').click();
       cy.contains('admin').click();
       cy.contains('Read').click();
@@ -156,9 +165,17 @@ describe('Repository Settings - Permissions', () => {
       cy.get(`[data-label="type"]`).should('have.text', ' Robot ');
       cy.get(`[data-label="role"]`).should('have.text', 'read');
     });
-    cy.contains('Add Permissions').click();
+    cy.contains('Add permissions').click();
     cy.get('#add-permission-form').within(() => {
-      cy.get('input').type('test');
+      // We need the wait otherwise the dropdown won't open
+      cy.wait(2000);
+      cy.get('input[placeholder="Search for user, add/create robot account"]')
+        .click()
+        .type('test');
+      cy.get(
+        'input[placeholder="Search for user, add/create robot account"]',
+      ).should('have.value', 'test');
+
       cy.contains('testteam2').click();
       cy.contains('admin').click();
       cy.contains('Read').click();

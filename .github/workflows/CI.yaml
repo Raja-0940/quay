@@ -100,7 +100,7 @@ jobs:
       run: tox -e py39-unit -- --cov=./ --cov-report=xml
 
     - name: Upload coverage reports to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         flags: unit
@@ -203,9 +203,9 @@ jobs:
 
     - name: Start Quay
       run: |
-        docker-compose up -d redis quay-db
+        docker compose up -d redis quay-db
         docker exec -t quay-db bash -c 'while ! pg_isready; do echo "waiting for postgres"; sleep 2; done'
-        DOCKER_USER="1001:0" docker-compose up -d --no-build quay
+        DOCKER_USER="1001:0" docker compose up -d --no-build quay
 
     - name: Checkout
       uses: actions/checkout@v3
@@ -229,6 +229,12 @@ jobs:
         sleep 30
         make integration-test
 
+    - name: Apply extra config options
+      run:  |
+        cat web/cypress/test/extra-config.yaml >> local-dev/stack/config.yaml
+        docker restart quay-quay
+        sleep 30
+
     - name: Cypress run
       uses: cypress-io/github-action@v5
       with:
@@ -241,17 +247,30 @@ jobs:
       env:
         REACT_QUAY_APP_API_URL: http://localhost:8080
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: cypress-screenshots
         path: web/cypress/screenshots
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       if: always()
       with:
         name: cypress-videos
         path: web/cypress/videos
+
+    - name: Create report
+      run: |
+        mkdir -p .logs/
+        docker logs quay-quay >.logs/quay.log 2>&1 || true
+      if: always()
+
+    - name: Upload Quay logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: logs
+        path: .logs/
+      if: always()
 
   mysql:
     name: E2E MySQL Test

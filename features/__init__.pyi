@@ -192,6 +192,9 @@ SECURITY_SCANNER_NOTIFY_ON_NEW_INDEX: FeatureNameValue
 EXTENDED_REPOSITORY_NAMES: FeatureNameValue
 
 QUOTA_MANAGEMENT: FeatureNameValue
+EDIT_QUOTA: FeatureNameValue
+
+QUOTA_SUPPRESS_FAILURES: FeatureNameValue
 
 HELM_OCI_SUPPORT: FeatureNameValue
 
@@ -206,3 +209,16 @@ ENTITLEMENT_RECONCILIATION_MARKETPLACE_ENDPOINT: FeatureNameValue
 
 # Feature Flag: Whether to use RH internal marketplace for subscriptions
 RH_MARKETPLACE: FeatureNameValue
+
+AUTO_PRUNE: FeatureNameValue
+DEFAULT_NAMESPACE_AUTOPRUNE_POLICY: FeatureNameValue
+
+# Referrer APIO
+MANIFEST_SUBJECT_BACKFILL: FeatureNameValue
+REFERRERS_API: FeatureNameValue
+
+SUPERUSERS_FULL_ACCESS: FeatureNameValue
+ASSIGN_OAUTH_TOKEN: FeatureNameValue
+
+# Feature Flag: If set to true, supports setting notifications on image expiry
+IMAGE_EXPIRY_TRIGGER: FeatureNameValue

@@ -49,7 +49,7 @@ from data.readreplica import (
     ReadReplicaSupportedModel,
     disallow_replica_use,
 )
-from data.text import match_like, match_mysql
+from data.text import match_like, match_mysql, regex_search, regex_sqlite
 from util.metrics.prometheus import (
     db_close_calls,
     db_connect_calls,
@@ -87,6 +87,10 @@ SCHEME_MATCH_FUNCTION = {
     "sqlite": match_like,
     "postgresql": match_like,
     "postgresql+psycopg2": match_like,
+}
+
+SCHEME_REGEX_FUNCTION = {
+    "sqlite": regex_sqlite,
 }
 
 
@@ -146,11 +150,11 @@ SCHEME_SPECIALIZED_CONCAT = {
 }
 
 
-def real_for_update(query):
-    return query.for_update()
+def real_for_update(query, skip_locked=False):
+    return query.for_update("FOR UPDATE SKIP LOCKED") if skip_locked else query.for_update()
 
 
-def null_for_update(query):
+def null_for_update(query, skip_locked=False):
     return query
 
 
@@ -329,6 +333,7 @@ db = Proxy()
 read_only_config = Proxy()
 db_random_func = CallableProxy()
 db_match_func = CallableProxy()
+db_regex_search = CallableProxy()
 db_for_update = CallableProxy()
 db_transaction = CallableProxy()
 db_disallow_replica_use = CallableProxy()
@@ -422,11 +427,16 @@ def _db_from_url(
     allow_pooling=True,
     allow_retry=True,
     is_read_replica=False,
+    builder_host_override=None,
 ):
     parsed_url = make_url(url)
 
     if parsed_url.host:
         db_kwargs["host"] = parsed_url.host
+        service_name = os.getenv("SUPERVISOR_PROCESS_NAME")
+        if service_name == "builder" and builder_host_override is not None:
+            db_kwargs["host"] = builder_host_override
+        logger.info("Setting database host to %s for worker %s", db_kwargs["host"], service_name)
     if parsed_url.port:
         db_kwargs["port"] = parsed_url.port
     if parsed_url.username:
@@ -492,7 +502,15 @@ def configure(config_object, testing=False):
     logger.debug("Configuring database")
     db_kwargs = dict(config_object["DB_CONNECTION_ARGS"])
     write_db_uri = config_object["DB_URI"]
-    db.initialize(_db_from_url(write_db_uri, db_kwargs))
+    allow_pooling = config_object.get("DB_CONNECTION_POOLING", True)
+    db.initialize(
+        _db_from_url(
+            write_db_uri,
+            db_kwargs,
+            allow_pooling=allow_pooling,
+            builder_host_override=config_object.get("BUILDER_DB_HOST_OVERRIDE", None),
+        )
+    )
 
     parsed_write_uri = make_url(write_db_uri)
     db_random_func.initialize(SCHEME_RANDOM_FUNCTION[parsed_write_uri.drivername])
@@ -505,6 +523,7 @@ def configure(config_object, testing=False):
     )
     db_encrypter.initialize(FieldEncrypter(config_object.get("DATABASE_SECRET_KEY")))
     db_count_estimator.initialize(SCHEME_ESTIMATOR_FUNCTION[parsed_write_uri.drivername])
+    db_regex_search.initialize(SCHEME_REGEX_FUNCTION.get(parsed_write_uri.drivername, regex_search))
 
     read_replicas = config_object.get("DB_READ_REPLICAS", None)
     is_read_only = config_object.get("REGISTRY_STATE", "normal") == "readonly"
@@ -516,6 +535,7 @@ def configure(config_object, testing=False):
                 ro_config["DB_URI"],
                 ro_config.get("DB_CONNECTION_ARGS", db_kwargs),
                 is_read_replica=True,
+                allow_pooling=ro_config.get("DB_CONNECTION_POOLING", True),
             )
             for ro_config in read_replicas
         ]
@@ -746,6 +766,11 @@ class User(BaseModel):
                     QuotaLimits,
                     RedHatSubscriptions,
                     OrganizationRhSkus,
+                    NamespaceAutoPrunePolicy,
+                    AutoPruneTaskStatus,
+                    RepositoryAutoPrunePolicy,
+                    OauthAssignedToken,
+                    TagNotificationSuccess,
                 }
                 | appr_classes
                 | v22_classes
@@ -966,6 +991,8 @@ class Repository(BaseModel):
                 UploadedBlob,
                 QuotaNamespaceSize,
                 QuotaRepositorySize,
+                RepositoryAutoPrunePolicy,
+                TagNotificationSuccess,
             }
             | appr_classes
             | v22_classes
@@ -981,15 +1008,15 @@ class RepositorySearchScore(BaseModel):
 
 
 class QuotaNamespaceSize(BaseModel):
-    namespace_user = ForeignKeyField(User, unique=True)
-    size_bytes = BigIntegerField(null=False, default=0)
-    backfill_start_ms = BigIntegerField(null=True)
+    namespace_user = ForeignKeyField(User, unique=True, index=True)
+    size_bytes = BigIntegerField(null=False, default=0, index=True)
+    backfill_start_ms = BigIntegerField(null=True, index=True)
     backfill_complete = BooleanField(null=False, default=False)
 
 
 class QuotaRepositorySize(BaseModel):
-    repository = ForeignKeyField(Repository, unique=True)
-    size_bytes = BigIntegerField(null=False, default=0)
+    repository = ForeignKeyField(Repository, unique=True, index=True)
+    size_bytes = BigIntegerField(null=False, default=0, index=True)
     backfill_start_ms = BigIntegerField(null=True)
     backfill_complete = BooleanField(null=False, default=False)
 
@@ -1420,6 +1447,7 @@ class RepositoryNotification(BaseModel):
     config_json = TextField()
     event_config_json = TextField(default="{}")
     number_of_failures = IntegerField(default=0)
+    last_ran_ms = BigIntegerField(null=True, index=True)
 
 
 class RepositoryAuthorizedEmail(BaseModel):
@@ -1723,6 +1751,10 @@ class Manifest(BaseModel):
 
     config_media_type = CharField(null=True)
     layers_compressed_size = BigIntegerField(null=True)
+    subject = CharField(null=True)
+    subject_backfilled = BooleanField(default=False, index=True)
+    artifact_type = CharField(null=True)
+    artifact_type_backfilled = BooleanField(default=False, index=True)
 
     class Meta:
         database = db
@@ -1731,6 +1763,8 @@ class Manifest(BaseModel):
             (("repository", "digest"), True),
             (("repository", "media_type"), False),
             (("repository", "config_media_type"), False),
+            (("repository", "subject"), False),
+            (("repository", "artifact_type"), False),
         )
 
 
@@ -1751,8 +1785,10 @@ class Tag(BaseModel):
     repository = ForeignKeyField(Repository)
     repository_id: int
     manifest = ForeignKeyField(Manifest, null=True)
+    manifest_id: int
     lifetime_start_ms = BigIntegerField(default=get_epoch_timestamp_ms)
     lifetime_end_ms = BigIntegerField(null=True, index=True)
+    immutable = BooleanField(default=False)
     hidden = BooleanField(default=False)
     reversion = BooleanField(default=False)
     tag_kind = EnumField(TagKind)
@@ -1769,6 +1805,9 @@ class Tag(BaseModel):
             (("repository", "lifetime_end_ms"), False),
             # This unique index prevents deadlocks when concurrently moving and deleting tags
             (("repository", "name", "lifetime_end_ms"), True),
+            (("repository", "immutable"), False),
+            (("manifest", "immutable"), False),
+            (("manifest", "lifetime_end_ms"), False),
         )
 
 
@@ -1896,10 +1935,10 @@ class RepoMirrorConfig(BaseModel):
     )
     external_reference = CharField()
     external_registry_username = EncryptedCharField(max_length=4096, null=True)
-    external_registry_password = EncryptedCharField(max_length=4096, null=True)
+    external_registry_password = EncryptedCharField(max_length=9000, null=True)
     external_registry_config = JSONField(default={})
 
-    # Worker Queuing
+    # Worker Queuingg
     sync_interval = IntegerField()  # seconds between syncs
     sync_start_date = DateTimeField(null=True)  # next start time
     sync_expiration_date = DateTimeField(null=True)  # max duration
@@ -1995,14 +2034,53 @@ class OrganizationRhSkus(BaseModel):
     RH subscriptions
     """
 
-    subscription_id = IntegerField(index=True, unique=True)
+    subscription_id = IntegerField(index=True)
     user_id = ForeignKeyField(User, backref="org_bound_subscription")
     org_id = ForeignKeyField(User, backref="subscription")
+    quantity = IntegerField(index=True, null=True)
 
     indexes = (
         (("subscription_id", "org_id"), True),
         (("subscription_id", "org_id", "user_id"), True),
     )
+
+
+class NamespaceAutoPrunePolicy(BaseModel):
+    uuid = CharField(default=uuid_generator, max_length=36, index=True, null=False)
+    namespace = QuayUserField(index=True, null=False)
+    policy = JSONField(null=False, default={})
+
+
+class AutoPruneTaskStatus(BaseModel):
+    namespace = QuayUserField(index=True, null=False)
+    last_ran_ms = BigIntegerField(null=True, index=True)
+    status = TextField(null=True)
+
+
+class RepositoryAutoPrunePolicy(BaseModel):
+    uuid = CharField(default=uuid_generator, max_length=36, index=True, null=False)
+    repository = ForeignKeyField(Repository, index=True, null=False)
+    namespace = QuayUserField(index=True, null=False)
+    policy = JSONField(null=False, default={})
+
+
+class OauthAssignedToken(BaseModel):
+    uuid = CharField(default=uuid_generator, max_length=36, index=True, unique=True, null=False)
+    assigned_user = QuayUserField(index=True, unique=False, null=False)
+    application = ForeignKeyField(OAuthApplication, index=True, null=False, unique=False)
+    redirect_uri = CharField(max_length=255, null=True)
+    scope = CharField(max_length=255, null=False)
+    response_type = CharField(max_length=255, null=True)
+
+    class Meta:
+        database = db
+        read_only_config = read_only_config
+
+
+class TagNotificationSuccess(BaseModel):
+    notification = ForeignKeyField(RepositoryNotification, index=True, null=False)
+    tag = ForeignKeyField(Tag, index=True, null=False)
+    method = ForeignKeyField(ExternalNotificationMethod, null=False)
 
 
 # Defines a map from full-length index names to the legacy names used in our code

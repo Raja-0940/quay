@@ -1,9 +1,7 @@
-from test.fixtures import *
-
 import pytest
 from mock import Mock, patch
 
-from app import app, instance_keys, storage
+from app import instance_keys, storage
 from data.database import IndexerVersion, IndexStatus, ManifestSecurityStatus
 from data.registry_model import registry_model
 from data.secscan_model import secscan_model
@@ -14,6 +12,9 @@ from data.secscan_model.datatypes import (
 from data.secscan_model.secscan_v4_model import IndexReportState
 from data.secscan_model.secscan_v4_model import ScanToken as V4ScanToken
 from data.secscan_model.secscan_v4_model import V4SecurityScanner
+from test.fixtures import *
+
+from app import app  # isort: skip
 
 
 @pytest.mark.parametrize(
@@ -51,9 +52,9 @@ def test_load_security_information(indexed_v4, expected_status, initialized_db):
 @pytest.mark.parametrize(
     "next_token, expected_next_token, expected_error",
     [
-        (None, V4ScanToken(56), None),
-        (V4ScanToken(None), V4ScanToken(56), AssertionError),
-        (V4ScanToken(1), V4ScanToken(56), None),
+        (None, V4ScanToken(58), None),
+        (V4ScanToken(None), V4ScanToken(58), AssertionError),
+        (V4ScanToken(1), V4ScanToken(58), None),
     ],
 )
 def test_perform_indexing(next_token, expected_next_token, expected_error, initialized_db):

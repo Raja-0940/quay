@@ -192,6 +192,14 @@ class DockerSchema2Manifest(ManifestInterface):
         return self._parsed[DOCKER_SCHEMA2_MANIFEST_MEDIATYPE_KEY]
 
     @property
+    def artifact_type(self):
+        return None
+
+    @property
+    def subject(self):
+        return None
+
+    @property
     def digest(self):
         return digest_tools.sha256_digest(self._payload.as_encoded_str())
 

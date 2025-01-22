@@ -1,3 +1,4 @@
+import {useEffect, useState} from 'react';
 import {
   Alert,
   AlertActionCloseButton,
@@ -5,11 +6,13 @@ import {
   Button,
   Dropdown,
   DropdownItem,
-  KebabToggle,
+  DropdownList,
+  MenuToggle,
+  MenuToggleElement,
   Modal,
   ModalVariant,
 } from '@patternfly/react-core';
-import {useEffect, useState} from 'react';
+import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon';
 import {useUpdateNotifications} from 'src/hooks/UseUpdateNotifications';
 import Conditional from 'src/components/empty/Conditional';
 import {
@@ -22,8 +25,8 @@ export default function NotificationsKebab({
   repo,
   notification,
 }: NotificationsKebabProps) {
-  const [isOpen, setIsOpen] = useState<boolean>();
-  const [isTestModalOpen, setIsTestModalOpen] = useState<boolean>(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const {
     deleteNotifications,
     errorDeletingNotification,
@@ -99,34 +102,40 @@ export default function NotificationsKebab({
       </Modal>
       <Dropdown
         onSelect={() => setIsOpen(false)}
-        toggle={
-          <KebabToggle
-            onToggle={() => {
-              setIsOpen(!isOpen);
-            }}
-          />
-        }
-        isOpen={isOpen}
-        dropdownItems={[
-          <DropdownItem key="test" onClick={() => test(notification.uuid)}>
-            Test Notification
-          </DropdownItem>,
-          <DropdownItem
-            key="delete"
-            onClick={() => deleteNotifications(notification.uuid)}
+        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            ref={toggleRef}
+            variant="plain"
+            id={`${notification.uuid}-toggle-kebab`}
+            data-testid={`${notification.uuid}-toggle-kebab`}
+            onClick={() => setIsOpen(() => !isOpen)}
+            isExpanded={isOpen}
           >
+            <EllipsisVIcon />
+          </MenuToggle>
+        )}
+        isOpen={isOpen}
+        onOpenChange={(isOpen) => setIsOpen(isOpen)}
+        shouldFocusToggleOnSelect
+      >
+        <DropdownList>
+          <DropdownItem onClick={() => test(notification.uuid)}>
+            Test Notification
+          </DropdownItem>
+
+          <DropdownItem onClick={() => deleteNotifications(notification.uuid)}>
             Delete Notification
-          </DropdownItem>,
-          <Conditional key="enable" if={isNotificationDisabled(notification)}>
+          </DropdownItem>
+
+          <Conditional if={isNotificationDisabled(notification)}>
             <DropdownItem
               onClick={() => enableNotifications(notification.uuid)}
             >
               Enable Notification
             </DropdownItem>
-          </Conditional>,
-        ]}
-        isPlain
-      />
+          </Conditional>
+        </DropdownList>
+      </Dropdown>
     </>
   );
 }

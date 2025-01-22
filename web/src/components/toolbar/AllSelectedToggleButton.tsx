@@ -6,21 +6,18 @@ import {
 } from '@patternfly/react-core';
 import React from 'react';
 
-type TableModeType = 'All' | 'Selected';
+type TableModeType = 'All' | 'Selected' | 'Collapse';
 
-export function AllSelectedToggleButton(props: ExpandCollapseButtonProps) {
-  const [tableMode, setTableMode] = React.useState<TableModeType>('Collapse');
+export function AllSelectedToggleButton(props: AllSelectedToggleButtonProps) {
+  const [tableMode, setTableMode] = React.useState<TableModeType>('All');
 
-  const onTableModeChange: ToggleGroupItemProps['onChange'] = (
-    _isSelected,
-    event,
-  ) => {
+  const onTableModeChange: ToggleGroupItemProps['onChange'] = (event) => {
     const id = event.currentTarget.id;
     setTableMode(id as TableModeType);
-    if (id == 'Expand') {
-      props.expandTable();
-    } else if (id == 'Collapse') {
-      props.collapseTable();
+    if (id == 'All') {
+      props.showAllItems();
+    } else if (id == 'Selected') {
+      props.showSelectedItems();
     }
   };
 
@@ -44,7 +41,7 @@ export function AllSelectedToggleButton(props: ExpandCollapseButtonProps) {
   );
 }
 
-type ExpandCollapseButtonProps = {
-  expandTable: () => void;
-  collapseTable: () => void;
+type AllSelectedToggleButtonProps = {
+  showAllItems: () => void;
+  showSelectedItems: () => void;
 };

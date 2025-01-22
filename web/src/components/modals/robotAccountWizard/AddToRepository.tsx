@@ -1,7 +1,11 @@
 import {useRecoilState} from 'recoil';
-import {searchRepoState} from 'src/atoms/RepositoryState';
-import React, {useEffect, useState} from 'react';
+import {searchReposState} from 'src/atoms/RepositoryState';
+import {useEffect, useState} from 'react';
 import {
+  Dropdown,
+  DropdownItem,
+  MenuToggle,
+  MenuToggleElement,
   PageSection,
   PanelFooter,
   Text,
@@ -13,24 +17,14 @@ import {
   Toolbar,
   ToolbarContent,
   ToolbarItem,
-  Dropdown,
-  DropdownItem,
-  DropdownSeparator,
-  KebabToggle,
 } from '@patternfly/react-core';
+import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon';
 import {DropdownCheckbox} from 'src/components/toolbar/DropdownCheckbox';
 import {ToolbarPagination} from 'src/components/toolbar/ToolbarPagination';
-import {
-  TableComposable,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-} from '@patternfly/react-table';
+import {Table, Tbody, Td, Th, Thead, Tr} from '@patternfly/react-table';
 import {DropdownWithDescription} from 'src/components/toolbar/DropdownWithDescription';
 import {IRepository} from 'src/resources/RepositoryResource';
-import {formatDate} from 'src/libs/utils';
+import {formatDate, titleCase} from 'src/libs/utils';
 import _ from 'lodash';
 import {SearchInput} from 'src/components/toolbar/SearchInput';
 
@@ -42,15 +36,12 @@ const ColumnNames = {
 
 type TableModeType = 'All' | 'Selected';
 
-const defaultSelectedVal = 'Read';
-const defaultUnSelectedVal = 'None';
-
 export default function AddToRepository(props: AddToRepositoryProps) {
   const [tableMode, setTableMode] = useState<TableModeType>('All');
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [tableItems, setTableItems] = useState([]);
-  const [search, setSearch] = useRecoilState(searchRepoState);
+  const [search, setSearch] = useRecoilState(searchReposState);
   const [robotRepoPermsMapping, setRobotRepoPermsMapping] = useState({});
   const [isUserEntry, setUserEntry] = useState(false);
   const [updatedRepoPerms, setUpdatedRepoPerms] = useState({});
@@ -60,10 +51,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
     return r1.last_modified > r2.last_modified ? -1 : 1;
   });
 
-  const onTableModeChange: ToggleGroupItemProps['onChange'] = (
-    _isSelected,
-    event,
-  ) => {
+  const onTableModeChange: ToggleGroupItemProps['onChange'] = (event) => {
     const id = event.currentTarget.id;
     setTableMode(id as TableModeType);
     if (id == 'All') {
@@ -102,14 +90,15 @@ export default function AddToRepository(props: AddToRepositoryProps) {
   }, [props.robotPermissions]);
 
   const updateTable = () => {
-    if (!props.robotPermissions) {
+    if (!props.robotPermissions?.length) {
+      // clear state if no repo perms
+      setRobotRepoPermsMapping({});
       return;
     }
     const temp = {};
     props.robotPermissions?.map(function (repoPerm) {
       const repo = repoPerm.repository.name;
-      const permission =
-        repoPerm.role.charAt(0).toUpperCase() + repoPerm.role.slice(1);
+      const permission = titleCase(repoPerm.role);
       const newItems = {
         ...temp,
         [repo]: permission,
@@ -136,7 +125,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
 
   const updateRepoPerms = (permission, repo) => {
     const repoName = repo.name ? repo.name : repo;
-    if (props.wizardStep) {
+    if (props.isWizardStep) {
       props.setSelectedRepoPerms((prevSelected) =>
         prevSelected.filter((item) => item.name !== repoName),
       );
@@ -167,7 +156,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
   };
 
   const fetchRepoPermission = (repo) => {
-    if (!props.wizardStep && updatedRepoPerms[repo.name] != null) {
+    if (!props.isWizardStep && updatedRepoPerms[repo.name] != null) {
       return updatedRepoPerms[repo.name];
     }
 
@@ -185,10 +174,6 @@ export default function AddToRepository(props: AddToRepositoryProps) {
       // set row as selected/un-selected
       updateRepoPerms(selectedVal.name, repo);
     });
-  };
-
-  const onKebabToggle = (isKebabOpen: boolean) => {
-    setKebabOpen(isKebabOpen);
   };
 
   const onKebabSelect = () => {
@@ -209,7 +194,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
 
   const updateRobotAccountsList = () => {
     if (
-      !props.wizardStep &&
+      !props.isWizardStep &&
       !_.isEqual(updatedRepoPerms, robotRepoPermsMapping)
     ) {
       setTimeout(() => props.setShowRepoModalSave(true), 0);
@@ -218,7 +203,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
     }
 
     if (
-      !props.wizardStep &&
+      !props.isWizardStep &&
       _.isEqual(updatedRepoPerms, robotRepoPermsMapping)
     ) {
       setTimeout(() => props.setShowRepoModalSave(false), 0);
@@ -232,7 +217,9 @@ export default function AddToRepository(props: AddToRepositoryProps) {
       <TextContent>
         <Text component={TextVariants.h1}>Add to repository (optional)</Text>
       </TextContent>
-      <PageSection>
+      <PageSection
+        {...(props.isWizardStep && {padding: {default: 'noPadding'}})}
+      >
         <Toolbar>
           <ToolbarContent>
             <DropdownCheckbox
@@ -267,16 +254,24 @@ export default function AddToRepository(props: AddToRepositoryProps) {
             <ToolbarItem>
               <Dropdown
                 onSelect={onKebabSelect}
-                toggle={
-                  <KebabToggle
+                toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                  <MenuToggle
+                    ref={toggleRef}
                     id="toggle-bulk-perms-kebab"
-                    onToggle={onKebabToggle}
-                  />
-                }
+                    aria-label="Toggle bulk permissions"
+                    variant="plain"
+                    onClick={() => setKebabOpen(!isKebabOpen)}
+                    isExpanded={isKebabOpen}
+                  >
+                    <EllipsisVIcon />
+                  </MenuToggle>
+                )}
                 isOpen={isKebabOpen}
-                isPlain
-                dropdownItems={kebabItems}
-              />
+                onOpenChange={(isOpen) => setKebabOpen(isOpen)}
+                shouldFocusToggleOnSelect
+              >
+                {kebabItems}
+              </Dropdown>
             </ToolbarItem>
             <ToolbarPagination
               itemsList={filteredItems}
@@ -288,7 +283,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
             />
           </ToolbarContent>
         </Toolbar>
-        <TableComposable aria-label="Selectable table">
+        <Table aria-label="Selectable table" variant="compact">
           <Thead>
             <Tr>
               <Th />
@@ -308,6 +303,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
                         onSelectItem(repo, rowIndex, isSelecting),
                       isSelected: isItemSelected(repo),
                     }}
+                    data-testid={`checkbox-row-${repo.name}`}
                   />
                   <Td dataLabel={ColumnNames.name}>{repo.name}</Td>
                   <Td dataLabel={ColumnNames.permissions}>
@@ -333,7 +329,7 @@ export default function AddToRepository(props: AddToRepositoryProps) {
               </Tbody>
             );
           })}
-        </TableComposable>
+        </Table>
         <PanelFooter>
           <ToolbarPagination
             itemsList={filteredItems}
@@ -354,12 +350,12 @@ interface AddToRepositoryProps {
   namespace: string;
   dropdownItems: any[];
   selectedRepos?: any[];
-  repos: IRepository[];
+  repos: IRepository[] | IRepository[][];
   setSelectedRepos: (repos) => void;
   selectedRepoPerms: any[];
   setSelectedRepoPerms: (repoPerm) => void;
   robotPermissions?: any[];
-  wizardStep: boolean;
+  isWizardStep?: boolean;
   robotName?: string;
   fetchingRobotPerms?: boolean;
   setPrevRepoPerms?: (preVal) => void;

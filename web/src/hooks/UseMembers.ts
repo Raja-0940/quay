@@ -2,8 +2,8 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {useState} from 'react';
 import {SearchState} from 'src/components/toolbar/SearchTypes';
 import {
-  IMemberTeams,
   IMembers,
+  addMemberToTeamForOrg,
   deleteCollaboratorForOrg,
   deleteTeamMemberForOrg,
   fetchCollaboratorsForOrg,
@@ -15,9 +15,40 @@ import {collaboratorViewColumnNames} from 'src/routes/OrganizationsList/Organiza
 import {memberViewColumnNames} from 'src/routes/OrganizationsList/Organization/Tabs/TeamsAndMembership/MembersView/MembersViewList';
 import {manageMemberColumnNames} from 'src/routes/OrganizationsList/Organization/Tabs/TeamsAndMembership/TeamsView/ManageMembers/ManageMembersList';
 
+export function useAddMembersToTeam(org: string, {onSuccess, onError}) {
+  const queryClient = useQueryClient();
+  const {
+    mutate: addMemberToTeam,
+    isError: errorAddingMemberToTeam,
+    isSuccess: successAddingMemberToTeam,
+    reset: resetAddingMemberToTeam,
+  } = useMutation(
+    async ({team, member}: {team: string; member: string}) => {
+      return addMemberToTeamForOrg(org, team, member);
+    },
+    {
+      onSuccess: () => {
+        onSuccess();
+        queryClient.invalidateQueries(['teams']);
+        queryClient.invalidateQueries(['members']);
+        queryClient.invalidateQueries(['teamMembers']);
+      },
+      onError: () => {
+        onError();
+      },
+    },
+  );
+  return {
+    addMemberToTeam,
+    errorAddingMemberToTeam,
+    successAddingMemberToTeam,
+    resetAddingMemberToTeam,
+  };
+}
+
 export function useFetchMembers(orgName: string) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [search, setSearch] = useState<SearchState>({
     query: '',
     field: memberViewColumnNames.username,
@@ -25,11 +56,11 @@ export function useFetchMembers(orgName: string) {
 
   const {
     data: members,
-    isLoading,
+    isLoading: isLoadingMembers,
     isPlaceholderData,
     isError: errorLoadingMembers,
   } = useQuery<IMembers[]>(
-    ['members'],
+    ['members', orgName],
     ({signal}) => fetchMembersForOrg(orgName, signal),
     {
       placeholderData: [],
@@ -50,7 +81,7 @@ export function useFetchMembers(orgName: string) {
     members,
     filteredMembers,
     paginatedMembers: paginatedMembers,
-    loading: isLoading || isPlaceholderData,
+    loading: isLoadingMembers || isPlaceholderData,
     error: errorLoadingMembers,
     page,
     setPage,
@@ -65,13 +96,33 @@ export interface ITeamMember {
   name: string;
   kind: string;
   is_robot: false;
-  avatar: IAvatar;
-  invited: boolean;
+  avatar?: IAvatar;
+  invited?: boolean;
+}
+
+export interface ITeamMembersCanSyncResponse {
+  service: string;
+  issuer_domain?: string;
+}
+
+export interface ITeamMembersSyncedResponse {
+  service: string;
+  // config is a variable, different auth systems have different config
+  config: object;
+  last_updated: string;
+}
+
+export interface ITeamMembersResponse {
+  name: string;
+  members: ITeamMember[];
+  can_sync: ITeamMembersCanSyncResponse;
+  synced: ITeamMembersSyncedResponse;
+  can_edit: boolean;
 }
 
 export function useFetchTeamMembersForOrg(orgName: string, teamName: string) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [search, setSearch] = useState<SearchState>({
     query: '',
     field: manageMemberColumnNames.teamMember,
@@ -82,15 +133,18 @@ export function useFetchTeamMembersForOrg(orgName: string, teamName: string) {
     isLoading,
     isPlaceholderData,
     isError: errorLoadingTeamMembers,
-  } = useQuery<ITeamMember[]>(
+  } = useQuery<ITeamMembersResponse>(
     ['teamMembers'],
     ({signal}) => fetchTeamMembersForOrg(orgName, teamName, signal),
     {
-      placeholderData: [],
+      placeholderData: <ITeamMembersResponse>{},
     },
   );
+  const allMembers: ITeamMember[] = data?.members;
 
-  const allMembers: ITeamMember[] = data;
+  const teamCanSync = data?.can_sync;
+  const teamSyncInfo = data?.synced;
+
   const filteredAllMembers =
     search.query !== ''
       ? allMembers?.filter((member) => member.name.includes(search.query))
@@ -144,6 +198,8 @@ export function useFetchTeamMembersForOrg(orgName: string, teamName: string) {
     paginatedTeamMembers,
     paginatedRobotAccounts,
     paginatedInvited,
+    teamCanSync,
+    teamSyncInfo,
     loading: isLoading || isPlaceholderData,
     error: errorLoadingTeamMembers,
     page,
@@ -157,7 +213,7 @@ export function useFetchTeamMembersForOrg(orgName: string, teamName: string) {
 
 export function useFetchCollaborators(orgName: string) {
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
+  const [perPage, setPerPage] = useState(20);
   const [search, setSearch] = useState<SearchState>({
     query: '',
     field: collaboratorViewColumnNames.username,
@@ -215,7 +271,7 @@ export function useDeleteTeamMember(orgName: string) {
       return deleteTeamMemberForOrg(orgName, teamName, memberName);
     },
     {
-      onSuccess: (_, variables) => {
+      onSuccess: () => {
         queryClient.invalidateQueries(['teamMembers']);
       },
     },
@@ -240,7 +296,7 @@ export function useDeleteCollaborator(orgName: string) {
       return deleteCollaboratorForOrg(orgName, collaborator);
     },
     {
-      onSuccess: (_, variables) => {
+      onSuccess: () => {
         queryClient.invalidateQueries(['collaborators']);
       },
     },

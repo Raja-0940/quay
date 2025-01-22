@@ -28,7 +28,7 @@ from data.model.oci.tag import (
     filter_to_alive_tags,
     get_child_manifests,
 )
-from data.model.quota import add_blob_size, reset_backfill
+from data.model.quota import QuotaOperation, update_quota
 from data.model.storage import lookup_repo_storages_by_content_checksum
 from image.docker.schema1 import ManifestException
 from image.docker.schema2 import EMPTY_LAYER_BLOB_DIGEST, EMPTY_LAYER_BYTES
@@ -140,6 +140,18 @@ def _lookup_manifest(repository_id, manifest_digest, allow_dead=False, allow_hid
         return None
 
 
+def lookup_manifest_referrers(repository_id, manifest_digest, artifact_type=None):
+    query = (
+        Manifest.select()
+        .where(Manifest.repository == repository_id)
+        .where(Manifest.subject == manifest_digest)
+    )
+    if artifact_type is not None:
+        query = query.where(Manifest.artifact_type == artifact_type)
+
+    return query
+
+
 @overload
 def create_manifest(
     repository_id: int,
@@ -175,9 +187,17 @@ def create_manifest(
             repository=repository_id,
             digest=manifest.digest,
             media_type=media_type,
-            manifest_bytes=manifest.bytes.as_encoded_str(),
+            manifest_bytes=manifest.bytes.as_encoded_str(),  # TODO(kleesc): Remove once fully on JSONB only
             config_media_type=manifest.config_media_type,
             layers_compressed_size=manifest.layers_compressed_size,
+            subject_backfilled=True,  # TODO(kleesc): Remove once backfill is done
+            subject=manifest.subject.digest
+            if manifest.subject
+            else None,  # TODO(kleesc): Remove once fully on JSONB only
+            artifact_type_backfilled=True,  # TODO(kleesc): Remove once backfill is done
+            artifact_type=manifest.artifact_type
+            if manifest.artifact_type
+            else None,  # TODO(kleesc): Remove once fully on JSONB only
         )
     except IntegrityError as e:
         # NOTE: An IntegrityError means (barring a bug) that the manifest was created by
@@ -307,7 +327,7 @@ def _create_manifest(
 
             # Retrieve its labels.
             labels = child_manifest.get_manifest_labels(retriever)
-            if labels is None:
+            if labels is None and isinstance(child_manifest, ManifestInterface):
                 if raise_on_error:
                     raise CreateManifestException("Unable to retrieve manifest labels")
 
@@ -363,12 +383,8 @@ def _create_manifest(
             if storage_ids:
                 connect_blobs(manifest, storage_ids, repository_id)
 
-            # Add blobs to namespace/repo total. If feature is not enabled the total
-            # should be marked stale
-            if features.QUOTA_MANAGEMENT and len(blob_sizes) > 0:
-                add_blob_size(repository_id, manifest.id, blob_sizes)
-            elif not features.QUOTA_MANAGEMENT:
-                reset_backfill(repository_id)
+            # Add blob sizes if quota management is enabled
+            update_quota(repository_id, manifest.id, blob_sizes, QuotaOperation.ADD)
 
             if child_manifest_rows:
                 connect_manifests(child_manifest_rows.values(), manifest, repository_id)
@@ -382,6 +398,7 @@ def _create_manifest(
                 create_temporary_tag_if_necessary(
                     manifest,
                     temp_tag_expiration_sec,
+                    skip_expiration=manifest_interface_instance.subject is not None,
                 )
 
         # Define the labels for the manifest (if any).

@@ -1,11 +1,10 @@
 import json
 import logging
 import time
-from datetime import datetime
 
 import requests
 
-from data.billing import RH_SKUS, get_plan_using_rh_sku
+from data.billing import RECONCILER_SKUS, RH_SKUS, get_plan_using_rh_sku
 from data.model import entitlements, organization_skus
 
 logger = logging.getLogger(__name__)
@@ -23,17 +22,12 @@ class RedHatUserApi(object):
 
     def get_account_number(self, user):
         email = user.email
-        account_number = entitlements.get_ebs_account_number(user.id)
-        if account_number is None:
-            account_number = self.lookup_customer_id(email)
-            if account_number:
-                # store in database for next lookup
-                entitlements.save_ebs_account_number(user, account_number)
-        return account_number
+        account_numbers = self.lookup_customer_id(email)
+        return account_numbers
 
     def lookup_customer_id(self, email):
         """
-        Send request to internal api for customer id (ebs acc number)
+        Send request to internal api for customer id (web customer id)
         """
         request_body_dict = {
             "by": {"emailStartsWith": email},
@@ -52,20 +46,32 @@ class RedHatUserApi(object):
         }
 
         request_url = f"{self.user_endpoint}/v2/findUsers"
-        r = requests.request(
-            method="post",
-            url=request_url,
-            cert=self.cert,
-            json=request_body_dict,
-            verify=True,
-            timeout=REQUEST_TIMEOUT,
-        )
+        try:
+            r = requests.request(
+                method="post",
+                url=request_url,
+                cert=self.cert,
+                json=request_body_dict,
+                verify=True,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.ReadTimeout:
+            logger.info("request to %s timed out", self.user_endpoint)
+            return None
 
         info = json.loads(r.content)
         if not info:
+            logger.debug("request to %s did not return any data", self.user_endpoint)
             return None
-        account_number = info[0]["accountRelationships"][0]["account"]["ebsAccountNumber"]
-        return account_number
+
+        customer_ids = []
+        for account in info:
+            customer_id = account["accountRelationships"][0]["account"].get("id")
+            # convert str response from api to int value
+            if customer_id.isdigit():
+                customer_id = int(customer_id)
+            customer_ids.append(customer_id)
+        return customer_ids
 
 
 class RedHatSubscriptionApi(object):
@@ -75,40 +81,46 @@ class RedHatSubscriptionApi(object):
             "ENTITLEMENT_RECONCILIATION_MARKETPLACE_ENDPOINT"
         )
 
-    def lookup_subscription(self, ebsAccountNumber, skuId):
+    def lookup_subscription(self, webCustomerId, skuId):
         """
         Use internal marketplace API to find subscription for customerId and sku
         """
         logger.debug(
-            "looking up subscription sku %s for account %s", str(skuId), str(ebsAccountNumber)
+            "looking up subscription sku %s for account %s", str(skuId), str(webCustomerId)
         )
 
-        subscriptions_url = f"{self.marketplace_endpoint}/subscription/v5/search/criteria;sku={skuId};web_customer_id={ebsAccountNumber}"
+        subscriptions_url = f"{self.marketplace_endpoint}/subscription/v5/search/criteria;sku={skuId};web_customer_id={webCustomerId}"
         request_headers = {"Content-Type": "application/json"}
 
         # Using CustomerID to get active subscription for user
-        r = requests.request(
-            method="get",
-            url=subscriptions_url,
-            headers=request_headers,
-            cert=self.cert,
-            verify=True,
-            timeout=REQUEST_TIMEOUT,
-        )
         try:
-            subscription = max(
-                json.loads(r.content), key=lambda i: (i["effectiveEndDate"]), default=None
+            r = requests.request(
+                method="get",
+                url=subscriptions_url,
+                headers=request_headers,
+                cert=self.cert,
+                verify=True,
+                timeout=REQUEST_TIMEOUT,
             )
+        except requests.exceptions.ReadTimeout:
+            logger.info("request to %s timed out", self.marketplace_endpoint)
+            return None
+
+        try:
+            subscriptions = json.loads(r.content)
         except json.decoder.JSONDecodeError:
             return None
 
-        if subscription:
-            end_date = subscription["effectiveEndDate"]
-            now_ms = time.time() * 1000
-            # Is subscription still valid?
-            if now_ms < end_date:
-                logger.debug("subscription found for %s", str(skuId))
-                return subscription
+        valid_subscriptions = []
+        if subscriptions:
+            for subscription in subscriptions:
+                end_date = subscription["effectiveEndDate"]
+                now_ms = time.time() * 1000
+                # Is subscription still valid?
+                if now_ms < end_date:
+                    logger.debug("subscription found for %s", str(skuId))
+                    valid_subscriptions.append(subscription)
+            return valid_subscriptions
         return None
 
     def extend_subscription(self, subscription_id, endDate):
@@ -117,14 +129,19 @@ class RedHatSubscriptionApi(object):
         """
         extend_url = f"{self.marketplace_endpoint}/subscription/v5/extendActiveSubscription/{subscription_id}/{endDate}"
         request_headers = {"Content-Type:": "application/json"}
-        r = requests.request(
-            method="get",
-            url=extend_url,
-            headers=request_headers,
-            cert=self.cert,
-            verify=True,
-            timeout=REQUEST_TIMEOUT,
-        )
+        try:
+            r = requests.request(
+                method="get",
+                url=extend_url,
+                headers=request_headers,
+                cert=self.cert,
+                verify=True,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.ReadTimeout:
+            logger.info("request to %s timed out", self.marketplace_endpoint)
+            return None
+
         logger.debug("Extended subscription %i to %s", subscription_id, str(endDate))
         return r
 
@@ -154,20 +171,25 @@ class RedHatSubscriptionApi(object):
             "webCustomerId": customerId,
         }
         logger.debug("Created entitlement")
-        r = requests.request(
-            method="post",
-            url=request_url,
-            cert=self.cert,
-            headers=request_headers,
-            json=request_body_dict,
-            verify=True,
-            timeout=REQUEST_TIMEOUT,
-        )
+        try:
+            r = requests.request(
+                method="post",
+                url=request_url,
+                cert=self.cert,
+                headers=request_headers,
+                json=request_body_dict,
+                verify=True,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except requests.exceptions.ReadTimeout:
+            logger.info("request to %s timed out", self.marketplace_endpoint)
+            return 408
+
         return r.status_code
 
-    def get_subscription_sku(self, subscription_id):
+    def get_subscription_details(self, subscription_id):
         """
-        Return the sku for a specific subscription
+        Return the sku and expiration date for a specific subscription
         """
         request_url = f"{self.marketplace_endpoint}/subscription/v5/products/subscription_id={subscription_id}"
         request_headers = {"Content-Type": "application/json"}
@@ -184,10 +206,19 @@ class RedHatSubscriptionApi(object):
 
             info = json.loads(r.content)
 
-            SubscriptionSKU = info[0]["sku"]
-            return SubscriptionSKU
+            subscription_sku = info[0]["sku"]
+            expiration_date = info[1]["activeEndDate"]
+            terminated_date = info[0]["terminatedDate"]
+            return {
+                "sku": subscription_sku,
+                "expiration_date": expiration_date,
+                "terminated_date": terminated_date,
+            }
         except requests.exceptions.SSLError:
             raise requests.exceptions.SSLError
+        except requests.exceptions.ReadTimeout:
+            logger.info("request to %s timed out", self.marketplace_endpoint)
+            return None
 
     def get_list_of_subscriptions(
         self, account_number, filter_out_org_bindings=False, convert_to_stripe_plans=False
@@ -198,57 +229,153 @@ class RedHatSubscriptionApi(object):
         """
         subscription_list = []
         for sku in RH_SKUS:
-            user_subscription = self.lookup_subscription(account_number, sku)
-            if user_subscription is not None:
-                bound_to_org = organization_skus.subscription_bound_to_org(user_subscription["id"])
+            subscriptions = self.lookup_subscription(account_number, sku)
+            if subscriptions:
+                for user_subscription in subscriptions:
+                    if user_subscription is not None:
+                        if (
+                            user_subscription["masterEndSystemName"] == "SUBSCRIPTION"
+                            and sku in RECONCILER_SKUS
+                        ):
+                            continue
 
-                if filter_out_org_bindings and bound_to_org[0]:
-                    continue
+                        bound_to_org, bound_subs = organization_skus.subscription_bound_to_org(
+                            user_subscription["id"]
+                        )
 
-                if convert_to_stripe_plans:
-                    subscription_list.append(get_plan_using_rh_sku(sku))
-                else:
-                    # add in sku field for convenience
-                    user_subscription["sku"] = sku
-                    subscription_list.append(user_subscription)
+                        if filter_out_org_bindings and bound_to_org:
+                            # special case for MW02702, we need to calculate how many
+                            # subscriptions are left if it is split across orgs
+                            if sku == "MW02702":
+                                total_attached = 0
+                                for sub in bound_subs:
+                                    total_attached += sub["quantity"]
+                                user_subscription["quantity"] -= total_attached
+                                if user_subscription["quantity"] <= 0:
+                                    continue
+                            else:
+                                continue
+
+                        if convert_to_stripe_plans:
+                            quantity = user_subscription["quantity"]
+                            for i in range(quantity):
+                                subscription_list.append(get_plan_using_rh_sku(sku))
+                        else:
+                            # add in sku field for convenience
+                            user_subscription["sku"] = sku
+                            subscription_list.append(user_subscription)
         return subscription_list
+
+
+# Mocked classes for unit tests
 
 
 TEST_USER = {
     "account_number": 12345,
-    "email": "test_user@test.com",
-    "username": "test_user",
-    "password": "password",
+    "email": "subscriptions@devtable.com",
+    "username": "subscription",
+    "subscriptions": [
+        {
+            "id": 12345678,
+            "masterEndSystemName": "Quay",
+            "createdEndSystemName": "SUBSCRIPTION",
+            "createdDate": 1675957362000,
+            "lastUpdateEndSystemName": "SUBSCRIPTION",
+            "lastUpdateDate": 1675957362000,
+            "installBaseStartDate": 1707368400000,
+            "installBaseEndDate": 1707368399000,
+            "webCustomerId": 123456,
+            "subscriptionNumber": "12399889",
+            "quantity": 2,
+            "effectiveStartDate": 1707368400000,
+            "effectiveEndDate": 3813177600000,
+        },
+        {
+            "id": 11223344,
+            "masterEndSystemName": "Quay",
+            "createdEndSystemName": "SUBSCRIPTION",
+            "createdDate": 1675957362000,
+            "lastUpdateEndSystemName": "SUBSCRIPTION",
+            "lastUpdateDate": 1675957362000,
+            "installBaseStartDate": 1707368400000,
+            "installBaseEndDate": 1707368399000,
+            "webCustomerId": 123456,
+            "subscriptionNumber": "12399889",
+            "quantity": 1,
+            "effectiveStartDate": 1707368400000,
+            "effectiveEndDate": 3813177600000,
+        },
+    ],
+    "private_subscription": {
+        "id": 80808080,
+        "masterEndSystemName": "Quay",
+        "createdEndSystemName": "SUBSCRIPTION",
+        "createdDate": 1675957362000,
+        "lastUpdateEndSystemName": "SUBSCRIPTION",
+        "lastUpdateDate": 1675957362000,
+        "installBaseStartDate": 1707368400000,
+        "installBaseEndDate": 1707368399000,
+        "webCustomerId": 123456,
+        "subscriptionNumber": "12399889",
+        "quantity": 10,
+        "effectiveStartDate": 1707368400000,
+        "effectiveEndDate": 3813177600000,
+    },
+    "reconciled_subscription": {
+        "id": 87654321,
+        "masterEndSystemName": "SUBSCRIPTION",
+        "createdEndSystemName": "SUBSCRIPTION",
+        "createdDate": 1675957362000,
+        "lastUpdateEndSystemName": "SUBSCRIPTION",
+        "lastUpdateDate": 1675957362000,
+        "installBaseStartDate": 1707368400000,
+        "installBaseEndDate": 1707368399000,
+        "webCustomerId": 123456,
+        "subscriptionNumber": "12399889",
+        "quantity": 1,
+        "effectiveStartDate": 1707368400000,
+        "effectiveEndDate": 3813177600000,
+    },
+    "terminated_subscription": {
+        "id": 22222222,
+        "masterEndSystemName": "SUBSCRIPTION",
+        "createdEndSystemName": "SUBSCRIPTION",
+        "createdDate": 1675957362000,
+        "lastUpdateEndSystemName": "SUBSCRIPTION",
+        "lastUpdateDate": 1675957362000,
+        "installBaseStartDate": 1707368400000,
+        "installBaseEndDate": 1707368399000,
+        "webCustomerId": 123456,
+        "subscriptionNumber": "12399889",
+        "quantity": 1,
+        "effectiveStartDate": 1707368400000,
+        "effectiveEndDate": 3813177600000,
+    },
 }
+STRIPE_USER = {"account_number": 11111, "email": "stripe_user@test.com", "username": "stripe_user"}
 FREE_USER = {
     "account_number": 23456,
     "email": "free_user@test.com",
     "username": "free_user",
-    "password": "password",
 }
 
-DEV_ACCOUNT_NUMBER = 76543
 
-
-class FakeUserApi(object):
+class FakeUserApi(RedHatUserApi):
     """
     Fake class used for tests
     """
 
     def lookup_customer_id(self, email):
         if email == TEST_USER["email"]:
-            return TEST_USER["account_number"]
+            return [TEST_USER["account_number"]]
         if email == FREE_USER["email"]:
-            return FREE_USER["account_number"]
+            return [FREE_USER["account_number"]]
+        if email == STRIPE_USER["email"]:
+            return [STRIPE_USER["account_number"]]
         return None
 
-    def get_account_number(self, user):
-        if user.username == "devtable":
-            return DEV_ACCOUNT_NUMBER
-        return self.lookup_customer_id(user.email)
 
-
-class FakeSubscriptionApi(object):
+class FakeSubscriptionApi(RedHatSubscriptionApi):
     """
     Fake class used for tests
     """
@@ -258,6 +385,12 @@ class FakeSubscriptionApi(object):
         self.subscription_created = False
 
     def lookup_subscription(self, customer_id, sku_id):
+        if customer_id == TEST_USER["account_number"] and sku_id == "MW02701":
+            return TEST_USER["subscriptions"]
+        elif customer_id == TEST_USER["account_number"] and sku_id == "MW02702":
+            return [TEST_USER["private_subscription"]]
+        elif customer_id == TEST_USER["account_number"] and sku_id == "MW00584MO":
+            return [TEST_USER["reconciled_subscription"]]
         return None
 
     def create_entitlement(self, customer_id, sku_id):
@@ -266,24 +399,22 @@ class FakeSubscriptionApi(object):
     def extend_subscription(self, subscription_id, end_date):
         self.subscription_extended = True
 
-    def get_subscription_sku(self, subscription_id):
-        if id == 12345:
-            return "FakeSku"
+    def get_subscription_details(self, subscription_id):
+        valid_ids = [subscription["id"] for subscription in TEST_USER["subscriptions"]]
+        if subscription_id in valid_ids:
+            return {"sku": "MW02701", "expiration_date": 3813177600000, "terminated_date": None}
+        elif subscription_id == 80808080:
+            return {"sku": "MW02702", "expiration_date": 1645544830000, "terminated_date": None}
+        elif subscription_id == 87654321:
+            return {"sku": "MW00584MO", "expiration_date": 3813177600000, "terminated_date": None}
+        elif subscription_id == 22222222:
+            return {
+                "sku": "MW00584MO",
+                "expiration_date": 3813177600000,
+                "terminated_date": 1645544830000,
+            }
         else:
             return None
-
-    def get_list_of_subscriptions(
-        self, account_number, filter_out_org_bindings=False, convert_to_stripe_plans=False
-    ):
-        if account_number == DEV_ACCOUNT_NUMBER:
-            return [
-                {
-                    "id": 12345,
-                    "sku": "FakeSku",
-                    "privateRepos": 0,
-                }
-            ]
-        return []
 
 
 class MarketplaceUserApi(object):
@@ -296,10 +427,13 @@ class MarketplaceUserApi(object):
 
     def init_app(self, app):
         marketplace_enabled = app.config.get("FEATURE_RH_MARKETPLACE", False)
+        reconciler_enabled = app.config.get("ENTITLEMENT_RECONCILIATION", False)
 
-        marketplace_user_api = FakeUserApi()
+        use_rh_api = marketplace_enabled or reconciler_enabled
 
-        if marketplace_enabled and not app.config.get("TESTING"):
+        marketplace_user_api = FakeUserApi(app.config)
+
+        if use_rh_api and not app.config.get("TESTING"):
             marketplace_user_api = RedHatUserApi(app.config)
 
         app.extensions = getattr(app, "extensions", {})
@@ -319,11 +453,14 @@ class MarketplaceSubscriptionApi(object):
             self.state = None
 
     def init_app(self, app):
+        reconciler_enabled = app.config.get("ENTITLEMENT_RECONCILIATION", False)
         marketplace_enabled = app.config.get("FEATURE_RH_MARKETPLACE", False)
+
+        use_rh_api = marketplace_enabled or reconciler_enabled
 
         marketplace_subscription_api = FakeSubscriptionApi()
 
-        if marketplace_enabled and not app.config.get("TESTING"):
+        if use_rh_api and not app.config.get("TESTING"):
             marketplace_subscription_api = RedHatSubscriptionApi(app.config)
 
         app.extensions = getattr(app, "extensions", {})

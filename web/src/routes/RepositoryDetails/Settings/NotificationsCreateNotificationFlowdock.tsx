@@ -2,16 +2,13 @@ import {NotificationEvent} from 'src/hooks/UseEvents';
 import {NotificationMethod} from 'src/hooks/UseNotificationMethods';
 import {
   ActionGroup,
-  Alert,
-  AlertActionCloseButton,
   Button,
   FormGroup,
-  Modal,
-  ModalVariant,
   TextInput,
 } from '@patternfly/react-core';
 import {useEffect, useState} from 'react';
 import {useUpdateNotifications} from 'src/hooks/UseUpdateNotifications';
+import {NotificationEventConfig} from 'src/hooks/UseEvents';
 
 export default function CreateFlowdockNotification(
   props: CreateFlowdockNotification,
@@ -26,7 +23,10 @@ export default function CreateFlowdockNotification(
   } = useUpdateNotifications(props.org, props.repo);
 
   const isFormComplete =
-    props.method != undefined && props.event != undefined && apiTopken != '';
+    props.method != undefined &&
+    props.event != undefined &&
+    apiTopken != '' &&
+    props.isValidateConfig();
 
   const createNotification = async () => {
     create({
@@ -34,7 +34,7 @@ export default function CreateFlowdockNotification(
         flow_api_token: apiTopken,
       },
       event: props.event?.type,
-      event_config: {},
+      event_config: props.eventConfig,
       method: props.method?.type,
       title: title,
     });
@@ -65,14 +65,14 @@ export default function CreateFlowdockNotification(
           required
           id="flowdock-api-token-field"
           value={apiTopken}
-          onChange={(value) => setAPIToken(value)}
+          onChange={(_event, value) => setAPIToken(value)}
         />
       </FormGroup>
       <FormGroup fieldId="title" label="Title">
         <TextInput
           id="notification-title"
           value={title}
-          onChange={(value) => setTitle(value)}
+          onChange={(_event, value) => setTitle(value)}
         />
       </FormGroup>
       <ActionGroup>
@@ -93,6 +93,8 @@ interface CreateFlowdockNotification {
   repo: string;
   event: NotificationEvent;
   method: NotificationMethod;
+  eventConfig: NotificationEventConfig;
+  isValidateConfig: () => boolean;
   closeDrawer: () => void;
   setError: (error: string) => void;
 }
